@@ -1,7 +1,6 @@
 """
 CLI entry point -- thin client over the use cases.
 """
-
 from __future__ import annotations
 
 import asyncio
@@ -51,9 +50,8 @@ async def _init_storage_only(cfg: dict):
 
 async def _init_services(cfg: dict):
     """Initialize all adapters and return (storage, embedding, ingest, search, analyze)."""
-    import logging
     import warnings
-
+    import logging
     warnings.filterwarnings("ignore", message=".*unauthenticated.*")
     logging.getLogger("mlx").setLevel(logging.ERROR)
 
@@ -80,7 +78,6 @@ async def _init_services(cfg: dict):
     api_key = llm_cfg.get("api_key", "") or ""
     # Resolve env var references like ${OPENROUTER_API_KEY}
     import os
-
     if api_key.startswith("${") and api_key.endswith("}"):
         api_key = os.environ.get(api_key[2:-1], "")
 
@@ -134,6 +131,8 @@ def main():
         asyncio.run(_cmd_annotate())
     elif command == "notifications":
         asyncio.run(_cmd_notifications())
+    elif command == "signals":
+        asyncio.run(_cmd_signals())
     elif command in ("--help", "-h", "help"):
         _print_help()
     else:
@@ -155,12 +154,13 @@ Commands:
   thesis [name]     Thesis coverage report
   stats             Show workspace statistics
   stale [--days N]  Find stale judgments
-  maintain <sub>    Data maintenance (embeddings|tags|dedupe|classification|all)
+  maintain <sub>    Data maintenance (embeddings|tags|dedupe|classification|audit-classification|all)
   digest [--days N] Daily research digest
   import-link <url> Import a web article (--annotation TEXT)
   import-file <path> Import a PDF/DOCX/TXT file (--annotation TEXT)
   annotate <id>     Add user annotation to an event
   notifications     Show proactive push notifications
+  signals           Analyze signals for recent events (--event-id ID | --recent N)
 
 Options:
   --force           Re-import all files (skip_existing=False)
@@ -177,7 +177,6 @@ Examples:
 
 def _cmd_serve():
     import uvicorn
-
     cfg = load_config()
     api_cfg = cfg.get("api", {})
     host = api_cfg.get("host", "127.0.0.1")
@@ -220,10 +219,7 @@ async def _cmd_import():
             skip_existing=not force,
             on_progress=on_progress,
         )
-        print(
-            f"\nDone: {result['imported']} imported, {result['skipped']} skipped,"
-            f" {result['errors']} errors (of {result['total']} files)"
-        )
+        print(f"\nDone: {result['imported']} imported, {result['skipped']} skipped, {result['errors']} errors (of {result['total']} files)")
     finally:
         await storage.close()
 
@@ -246,10 +242,8 @@ async def _cmd_sync():
     storage, _, ingest, _, _ = await _init_services(cfg)
     try:
         result = await ingest.sync_vault(vault_path, on_progress=on_progress)
-        print(
-            f"\nSync done: {result['imported']} new, {result['updated']} updated, "
-            f"{result['unchanged']} unchanged, {result['errors']} errors"
-        )
+        print(f"\nSync done: {result['imported']} new, {result['updated']} updated, "
+              f"{result['unchanged']} unchanged, {result['errors']} errors")
     finally:
         await storage.close()
 
@@ -269,7 +263,7 @@ async def _cmd_search():
             return
         for i, r in enumerate(results, 1):
             e = r.event
-            print(f"\n{'=' * 60}")
+            print(f"\n{'='*60}")
             print(f"  [{i}] {e.title} ({r.match_type}, score={r.score:.3f})")
             print(f"      Type: {e.type.value}  |  Tags: {', '.join(e.tags) or '-'}")
             print(f"      Thesis: {', '.join(e.thesis_links) or '-'}")
@@ -298,10 +292,7 @@ async def _cmd_thesis():
             print(f"\n{'Thesis':<40} {'Events':>6} {'Avg Conf':>9} {'Days Stale':>11}")
             print("-" * 70)
             for t in coverage:
-                print(
-                    f"  {t.thesis_name:<38} {t.event_count:>6}"
-                    f" {t.avg_confidence:>8.2f} {t.days_since_update:>10}"
-                )
+                print(f"  {t.thesis_name:<38} {t.event_count:>6} {t.avg_confidence:>8.2f} {t.days_since_update:>10}")
     finally:
         await storage.close()
 
@@ -311,13 +302,13 @@ async def _cmd_stats():
     storage, analyze = await _init_storage_only(cfg)
     try:
         s = await analyze.stats()
-        print("\nCortex Workspace Statistics")
-        print(f"{'=' * 40}")
+        print(f"\nCortex Workspace Statistics")
+        print(f"{'='*40}")
         print(f"  Events:    {s['events']}")
         print(f"  Entities:  {s['entities']}")
         print(f"  Relations: {s['relations']}")
         if s.get("events_by_type"):
-            print("\n  Events by type:")
+            print(f"\n  Events by type:")
             for t, c in s["events_by_type"].items():
                 print(f"    {t}: {c}")
     finally:
@@ -344,13 +335,13 @@ async def _cmd_stale():
 
 async def _cmd_maintain():
     sub = sys.argv[2] if len(sys.argv) > 2 else "all"
-    if sub not in ("embeddings", "tags", "dedupe", "classification", "all"):
-        print("Usage: cortex maintain <embeddings|tags|dedupe|classification|all>")
+    valid_subs = ("embeddings", "tags", "dedupe", "classification", "audit-classification", "all")
+    if sub not in valid_subs:
+        print("Usage: cortex maintain <embeddings|tags|dedupe|classification|audit-classification|all>")
         sys.exit(1)
 
     cfg = load_config()
     from cortex.use_cases.maintenance import MaintenanceUseCase
-
     storage, embedding, _, _, _ = await _init_services(cfg)
     workspace = cfg.get("workspace", "default")
     tag_config = cfg.get("tag_normalization", {})
@@ -360,13 +351,11 @@ async def _cmd_maintain():
     llm_adapter = None
     llm_cfg = cfg.get("llm", {}).get("openrouter", {})
     import os
-
     api_key = llm_cfg.get("api_key", "") or ""
     if api_key.startswith("${") and api_key.endswith("}"):
         api_key = os.environ.get(api_key[2:-1], "")
     if api_key:
         from cortex.adapters.llm.adapter import OpenRouterLLM
-
         llm_adapter = OpenRouterLLM(
             api_key=api_key,
             model=llm_cfg.get("model", "anthropic/claude-haiku-4.5"),
@@ -377,20 +366,15 @@ async def _cmd_maintain():
     try:
         if sub in ("embeddings", "all"):
             print("\n--- Backfilling entity embeddings ---")
-
             def emb_progress(done, total):
                 print(f"  [{done}/{total}] entities embedded")
-
             result = await maint.backfill_entity_embeddings(on_progress=emb_progress)
             print(f"  Done: {result['processed']}/{result['total']} entities embedded")
 
         if sub in ("tags", "all"):
             print("\n--- Normalizing tags ---")
             result = await maint.normalize_tags()
-            print(
-                f"  Done: {result['events_updated']}/{result['events_checked']} events updated,"
-                f"        {result['tags_changed']} tags changed"
-            )
+            print(f"  Done: {result['events_updated']}/{result['events_checked']} events updated, {result['tags_changed']} tags changed")
 
         if sub in ("classification", "all"):
             print("\n--- Classifying events (3 dimensions) ---")
@@ -402,7 +386,6 @@ async def _cmd_maintain():
                     print("  All events already classified.")
                 else:
                     from cortex.domain.constants import SOURCE_WEIGHTS
-
                     classified = 0
                     for i, evt in enumerate(events):
                         try:
@@ -419,22 +402,27 @@ async def _cmd_maintain():
                             )
                             classified += 1
                             if (i + 1) % 10 == 0:
-                                print(f"  [{i + 1}/{len(events)}] classified")
+                                print(f"  [{i+1}/{len(events)}] classified")
                         except Exception as e:
                             print(f"  Error classifying {evt.title[:40]}: {e}")
                     print(f"  Done: {classified}/{len(events)} events classified")
 
+        if sub == "audit-classification":
+            print("\n--- Auditing classification quality ---")
+            result = await maint.audit_classification()
+            print(f"  Events checked: {result['events_checked']}")
+            for issue, count in result["issues"].items():
+                if count > 0:
+                    print(f"  {issue}: {count}")
+            total = len(result["event_ids_to_reclassify"])
+            print(f"  Total events needing reclassification: {total}")
+
         if sub in ("dedupe", "all"):
             print("\n--- Deduplicating entities ---")
-
             def dedupe_progress(done, total):
                 print(f"  [{done}/{total}] entities merged")
-
             result = await maint.deduplicate_entities(on_progress=dedupe_progress)
-            print(
-                f"  Done: {result['merged']} merged"
-                f"        ({result['entities_before']} -> {result['entities_after']})"
-            )
+            print(f"  Done: {result['merged']} merged ({result['entities_before']} -> {result['entities_after']})")
 
         print("\nMaintenance complete.")
     finally:
@@ -452,13 +440,13 @@ async def _cmd_digest():
     try:
         digest = await analyze.daily_digest(days)
 
-        print(f"\n{'=' * 60}")
+        print(f"\n{'='*60}")
         print(f"  Cortex Daily Digest ({days} day{'s' if days > 1 else ''})")
-        print(f"{'=' * 60}")
+        print(f"{'='*60}")
 
         # Thesis activity
         if digest.get("thesis_activity"):
-            print("\n## Thesis Activity")
+            print(f"\n## Thesis Activity")
             for thesis, types in digest["thesis_activity"].items():
                 total = sum(types.values())
                 breakdown = ", ".join(f"{t}:{c}" for t, c in types.items())
@@ -466,7 +454,7 @@ async def _cmd_digest():
 
         # High confidence insights
         if digest.get("high_confidence"):
-            print("\n## High Confidence Insights")
+            print(f"\n## High Confidence Insights")
             for e in digest["high_confidence"]:
                 print(f"  [{e.confidence:.2f}] {e.title}")
                 if e.summary:
@@ -474,54 +462,50 @@ async def _cmd_digest():
 
         # Stale theses
         if digest.get("stale_theses"):
-            print("\n## Stale Theses (30+ days without new evidence)")
+            print(f"\n## Stale Theses (30+ days without new evidence)")
             for t in digest["stale_theses"]:
-                print(
-                    f"  {t.thesis_name}: {t.days_since_update} days stale ({t.event_count} events)"
-                )
+                print(f"  {t.thesis_name}: {t.days_since_update} days stale ({t.event_count} events)")
 
         # Entity momentum
         if digest.get("entity_momentum"):
-            print("\n## Entity Momentum (most mentioned this week)")
+            print(f"\n## Entity Momentum (most mentioned this week)")
             for ent in digest["entity_momentum"]:
                 print(f"  {ent['name']} ({ent['type']}): {ent['mentions']} mentions")
 
-        print(f"\n{'=' * 60}")
+        print(f"\n{'='*60}")
     finally:
         await storage.close()
+
 
 
 async def _cmd_import_link():
     if len(sys.argv) < 3:
         print("Usage: cortex import-link <url> [--annotation TEXT]")
         sys.exit(1)
-
+    
     url = sys.argv[2]
     annotation = None
     for i, arg in enumerate(sys.argv):
         if arg == "--annotation" and i + 1 < len(sys.argv):
             annotation = sys.argv[i + 1]
-
+    
     cfg = load_config()
     storage, embedding, ingest, _, _ = await _init_services(cfg)
-
+    
     try:
-        from cortex.adapters.filestore.store import FileStore
         from cortex.use_cases.ingest_link import IngestLinkUseCase
-
+        from cortex.adapters.filestore.store import FileStore
+        
         file_store = None
         fs_cfg = cfg.get("file_store", {})
         if fs_cfg.get("root"):
             file_store = FileStore(fs_cfg["root"])
-
+        
         link_ingest = IngestLinkUseCase(
-            storage,
-            embedding,
-            ingest._llm,
-            file_store,
+            storage, embedding, ingest._llm, file_store,
             cfg.get("workspace", "default"),
         )
-
+        
         print(f"Fetching: {url}")
         event = await link_ingest.import_link(url, user_annotation=annotation)
         if event:
@@ -545,13 +529,20 @@ async def _cmd_import_link():
         await storage.close()
 
 
+
 async def _analyze_contradictions(ingest, event, storage):
     """Run contradiction detection and print results."""
     signals = await ingest.post_ingest_analyze(event)
     if signals:
         print(f"  Signals detected: {len(signals)}")
         for s in signals:
-            print(f"    - [{s.signal_type}] {s.topic}: {s.summary}")
+            score = f"{s.priority_score:.2f}" if s.priority_score else "?"
+            print(f"    - [{s.signal_type} | {score}] {s.topic}: {s.summary}")
+            if s.rationale:
+                print(f"      Why: {s.rationale}")
+            if s.evidence_strength:
+                ids = ", ".join(s.evidence_event_ids[:3])
+                print(f"      Strength: {s.evidence_strength} | Events: [{ids}]")
     return signals
 
 
@@ -559,33 +550,30 @@ async def _cmd_import_file():
     if len(sys.argv) < 3:
         print("Usage: cortex import-file <path> [--annotation TEXT]")
         sys.exit(1)
-
+    
     file_path = sys.argv[2]
     annotation = None
     for i, arg in enumerate(sys.argv):
         if arg == "--annotation" and i + 1 < len(sys.argv):
             annotation = sys.argv[i + 1]
-
+    
     cfg = load_config()
     storage, embedding, ingest, _, _ = await _init_services(cfg)
-
+    
     try:
-        from cortex.adapters.filestore.store import FileStore
         from cortex.use_cases.ingest_file import IngestFileUseCase
-
+        from cortex.adapters.filestore.store import FileStore
+        
         file_store = None
         fs_cfg = cfg.get("file_store", {})
         if fs_cfg.get("root"):
             file_store = FileStore(fs_cfg["root"])
-
+        
         file_ingest = IngestFileUseCase(
-            storage,
-            embedding,
-            ingest._llm,
-            file_store,
+            storage, embedding, ingest._llm, file_store,
             cfg.get("workspace", "default"),
         )
-
+        
         print(f"Importing: {file_path}")
         event = await file_ingest.import_file(file_path, user_annotation=annotation)
         if event:
@@ -612,20 +600,19 @@ async def _cmd_annotate():
     if len(sys.argv) < 4:
         print("Usage: cortex annotate <event-id> <text>")
         sys.exit(1)
-
+    
     event_id = sys.argv[2]
     text = " ".join(sys.argv[3:])
-
+    
     cfg = load_config()
     storage, analyze = await _init_storage_only(cfg)
     workspace = cfg.get("workspace", "default")
-
+    
     try:
-        import uuid
-
         from cortex.domain.entities import Annotation
         from cortex.domain.stance import parse_user_stance
-
+        import uuid
+        
         stance = parse_user_stance(text)
         annotation = Annotation(
             id=str(uuid.uuid4()),
@@ -649,27 +636,96 @@ async def _cmd_notifications():
     cfg = load_config()
     storage, analyze = await _init_storage_only(cfg)
     workspace = cfg.get("workspace", "default")
-
+    
     try:
         from cortex.use_cases.push_detector import PushDetector
-
         detector = PushDetector(storage, workspace)
         notifications = await detector.check_all()
-
+        
         if not notifications:
             print("No notifications.")
             return
-
-        print(f"\n{'=' * 60}")
+        
+        print(f"\n{'='*60}")
         print(f"  Cortex Notifications ({len(notifications)})")
-        print(f"{'=' * 60}")
-
+        print(f"{'='*60}")
+        
         for n in notifications:
             priority_marker = {"high": "!!!", "medium": " ! ", "low": "   "}.get(n.priority, "   ")
             print(f"\n  [{priority_marker}] {n.title}")
             print(f"        {n.body}")
+        
+        print(f"\n{'='*60}")
+    finally:
+        await storage.close()
 
-        print(f"\n{'=' * 60}")
+
+async def _cmd_signals():
+    """Analyze signals for recent events or a specific event."""
+    cfg = load_config()
+    workspace = cfg.get("workspace", "default")
+
+    # Parse args
+    event_id = None
+    recent_n = 5
+    for i, arg in enumerate(sys.argv):
+        if arg == "--event-id" and i + 1 < len(sys.argv):
+            event_id = sys.argv[i + 1]
+        if arg == "--recent" and i + 1 < len(sys.argv):
+            recent_n = int(sys.argv[i + 1])
+
+    storage, embedding, llm, _, ingest = await _init_services(cfg)
+
+    try:
+        from cortex.use_cases.contradiction import ContradictionDetector
+        from cortex.use_cases.push_detector import PushDetector
+
+        detector = ContradictionDetector(storage, embedding, llm)
+        push = PushDetector(storage, workspace)
+
+        if event_id:
+            event = await storage.get_event(event_id, workspace)
+            if not event:
+                print(f"Event not found: {event_id}")
+                return
+            events = [event]
+        else:
+            # Get recent events
+            stats = await storage.stats(workspace)
+            events_raw = await storage.daily_events(None, workspace)
+            if not events_raw:
+                from cortex.domain.entities import KnowledgeEvent
+                events_raw = []
+            events = events_raw[:recent_n]
+
+        if not events:
+            print("No events to analyze.")
+            return
+
+        for event in events:
+            signals = await detector.analyze(event, workspace)
+            print(f"\n=== Signals for: \"{event.title}\" ===")
+            if not signals:
+                print("  (no signals detected)")
+                continue
+            for s in signals:
+                score = f"{s.priority_score:.2f}"
+                print(f"  [{s.signal_type} | {score}] {s.topic}")
+                if s.rationale:
+                    print(f"    Why: {s.rationale}")
+                strength = s.evidence_strength or "unknown"
+                ids = ", ".join(
+                    s.evidence_event_ids[:3]
+                )
+                print(f"    Strength: {strength} | Events: [{ids}]")
+
+            # Show which would become notifications
+            notifs = push.check_signals(signals)
+            if notifs:
+                print(
+                    f"  -> {len(notifs)} notification(s) "
+                    f"would be generated"
+                )
     finally:
         await storage.close()
 

@@ -7,13 +7,14 @@ Tests cover:
 - ContradictionDetector (3 tests)
 - PushDetector (4 tests)
 """
-
 from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
-from unittest.mock import MagicMock
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -23,7 +24,13 @@ from cortex.domain.entities import (
     EventType,
     KnowledgeEvent,
     PushNotification,
+    SearchResult,
     ThesisCoverage,
+)
+from cortex.use_cases.contradiction import (
+    _dedup_signals,
+    _filter_candidates,
+    _score_signals,
 )
 from cortex.use_cases.contradiction import ContradictionDetector
 from cortex.use_cases.ingest_file import IngestFileUseCase
@@ -31,10 +38,10 @@ from cortex.use_cases.ingest_link import IngestLinkUseCase
 from cortex.use_cases.push_detector import PushDetector
 from tests.conftest import FakeEmbedding, FakeLLM, FakeStorage
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_event(**kwargs) -> KnowledgeEvent:
     defaults = dict(
@@ -59,8 +66,8 @@ def _make_event(**kwargs) -> KnowledgeEvent:
 # IngestLinkUseCase tests
 # ---------------------------------------------------------------------------
 
-
 class TestIngestLinkUseCase:
+
     def _make_use_case(self, storage=None, embedding=None, llm=None):
         return IngestLinkUseCase(
             storage=storage or FakeStorage(),
@@ -124,7 +131,9 @@ class TestIngestLinkUseCase:
         response = httpx.Response(404, request=request)
 
         async def fake_get(self_client, url, **kwargs):
-            raise httpx.HTTPStatusError("404 Not Found", request=request, response=response)
+            raise httpx.HTTPStatusError(
+                "404 Not Found", request=request, response=response
+            )
 
         monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
@@ -137,7 +146,7 @@ class TestIngestLinkUseCase:
         """Ingesting the same URL twice completes without error on the second call."""
         html = (
             "<html><head><title>Dedup Article</title></head>"
-            "<body><p>Content for dedup test. </p></body></html>"
+            "<body><p>Content for dedup test. Enough text to pass the empty check.</p></body></html>"
         )
 
         fake_response = MagicMock()
@@ -168,8 +177,8 @@ class TestIngestLinkUseCase:
 # IngestFileUseCase tests
 # ---------------------------------------------------------------------------
 
-
 class TestIngestFileUseCase:
+
     def _make_use_case(self, storage=None, embedding=None, llm=None):
         return IngestFileUseCase(
             storage=storage or FakeStorage(),
@@ -182,9 +191,7 @@ class TestIngestFileUseCase:
     async def test_txt_file_ingestion(self, tmp_path):
         """A .txt file is ingested with source='file' and raw_input_type='file'."""
         txt_file = tmp_path / "notes.txt"
-        txt_file.write_text(
-            "This is a plain text document with interesting content.", encoding="utf-8"
-        )
+        txt_file.write_text("This is a plain text document with interesting content.", encoding="utf-8")
 
         use_case = self._make_use_case()
         event = await use_case.import_file(str(txt_file))
@@ -223,9 +230,7 @@ class TestIngestFileUseCase:
         import cortex.use_cases.ingest_file as ingest_file_module
 
         def fake_extract_pdf(path):
-            raise ImportError(
-                "PDF extraction requires pymupdf or pdfplumber. Install: pip install pymupdf"
-            )
+            raise ImportError("PDF extraction requires pymupdf or pdfplumber. Install: pip install pymupdf")
 
         monkeypatch.setattr(ingest_file_module, "_extract_pdf", fake_extract_pdf)
 
@@ -238,8 +243,8 @@ class TestIngestFileUseCase:
 # ContradictionDetector tests
 # ---------------------------------------------------------------------------
 
-
 class TestContradictionDetector:
+
     @pytest.mark.asyncio
     async def test_no_llm_returns_empty(self):
         """ContradictionDetector with llm=None always returns an empty list."""
@@ -281,21 +286,17 @@ class TestContradictionDetector:
         llm = FakeLLM()
 
         # Two existing events with different IDs and content
-        existing_a = _make_event(
-            id="existing-a", title="Event A", content="Company X is growing fast"
-        )
+        existing_a = _make_event(id="existing-a", title="Event A", content="Company X is growing fast")
         existing_b = _make_event(id="existing-b", title="Event B", content="Company X is shrinking")
         await storage.insert_event(existing_a)
         await storage.insert_event(existing_b)
 
-        contradiction_json = json.dumps(
-            {
-                "signal_type": "contradiction",
-                "topic": "test",
-                "summary": "conflict between A and B",
-                "confidence": 0.9,
-            }
-        )
+        contradiction_json = json.dumps({
+            "signal_type": "contradiction",
+            "topic": "test",
+            "summary": "conflict between A and B",
+            "confidence": 0.9,
+        })
 
         async def fake_chat(self_llm, prompt: str) -> str:
             return contradiction_json
@@ -318,7 +319,6 @@ class TestContradictionDetector:
 # ---------------------------------------------------------------------------
 # PushDetector tests
 # ---------------------------------------------------------------------------
-
 
 class FakeStorageWithStaleCoverage(FakeStorage):
     """FakeStorage that returns a stale ThesisCoverage for thesis detection tests."""
@@ -351,6 +351,7 @@ class FakeStorageWithMomentum(FakeStorage):
 
 
 class TestPushDetector:
+
     @pytest.mark.asyncio
     async def test_stale_thesis_notification(self):
         """A thesis with days_since_update >= 30 and event_count > 0 triggers a notification."""
@@ -377,7 +378,7 @@ class TestPushDetector:
 
     @pytest.mark.asyncio
     async def test_entity_momentum_spike(self):
-        """An entity with >= 5 mentions in 7 days triggers a momentum spike."""
+        """An entity with >= 5 mentions in the last 7 days triggers a momentum spike notification."""
         momentum_data = [
             {"name": "OpenAI", "type": "company", "mentions": 10},
         ]
@@ -412,3 +413,379 @@ class TestPushDetector:
         assert notif.related_event_ids == event_ids
         assert notif.priority == "high"
         assert notif.workspace_id == "default"
+
+
+# ---------------------------------------------------------------------------
+# Candidate filtering tests (Step 3)
+# ---------------------------------------------------------------------------
+
+class TestCandidateFiltering:
+
+    def test_low_score_candidate_filtered_out(self):
+        """Candidates below 0.5 score are filtered out."""
+        new = _make_event(id="new-1", content="New content here")
+        existing = _make_event(id="ex-1", content="Existing content here")
+        candidates = [SearchResult(event=existing, score=0.35, match_type="semantic")]
+        result = _filter_candidates(candidates, new)
+        assert len(result) == 0
+
+    def test_high_score_candidate_kept(self):
+        """Candidates at or above 0.5 score are kept."""
+        new = _make_event(id="new-1", content="New content here")
+        existing = _make_event(id="ex-1", content="Existing content sufficient length text")
+        candidates = [SearchResult(event=existing, score=0.7, match_type="semantic")]
+        result = _filter_candidates(candidates, new)
+        assert len(result) == 1
+
+    def test_self_match_filtered(self):
+        """Event with same ID as new_event is filtered."""
+        new = _make_event(id="same-id", content="Content")
+        existing = _make_event(id="same-id", content="Same event content")
+        candidates = [SearchResult(event=existing, score=0.9, match_type="semantic")]
+        result = _filter_candidates(candidates, new)
+        assert len(result) == 0
+
+    def test_stale_time_sensitive_filtered(self):
+        """Time-sensitive event older than 14 days is filtered."""
+        new = _make_event(id="new-1", content="New content here")
+        old_date = datetime.now(timezone.utc) - timedelta(days=30)
+        existing = _make_event(
+            id="ex-old", content="Old time sensitive content that is long enough",
+            temporality="time_sensitive", created_at=old_date,
+        )
+        candidates = [SearchResult(event=existing, score=0.8, match_type="semantic")]
+        result = _filter_candidates(candidates, new)
+        assert len(result) == 0
+
+    def test_recent_time_sensitive_kept(self):
+        """Time-sensitive event from yesterday is kept."""
+        new = _make_event(id="new-1", content="New content here")
+        yesterday = datetime.now(timezone.utc) - timedelta(days=1)
+        existing = _make_event(
+            id="ex-recent", content="Recent time sensitive content long enough",
+            temporality="time_sensitive", created_at=yesterday,
+        )
+        candidates = [SearchResult(event=existing, score=0.8, match_type="semantic")]
+        result = _filter_candidates(candidates, new)
+        assert len(result) == 1
+
+    def test_weak_content_no_summary_filtered(self):
+        """Event with weak key_points, no summary, short content is filtered."""
+        new = _make_event(id="new-1", content="New content here")
+        existing = _make_event(
+            id="ex-weak", content="Short",
+            summary="",
+            key_points=[{"text": "(no structured key points)", "type": "claim"}],
+        )
+        candidates = [SearchResult(event=existing, score=0.8, match_type="semantic")]
+        result = _filter_candidates(candidates, new)
+        assert len(result) == 0
+
+    def test_max_candidates_capped(self):
+        """No more than 6 candidates returned."""
+        new = _make_event(id="new-1", content="New content")
+        candidates = [
+            SearchResult(
+                event=_make_event(id=f"ex-{i}", content=f"Content number {i} long enough text"),
+                score=0.9,
+                match_type="semantic",
+            )
+            for i in range(10)
+        ]
+        result = _filter_candidates(candidates, new)
+        assert len(result) == 6
+
+
+# ---------------------------------------------------------------------------
+# Signal dedup and scoring tests (Step 4)
+# ---------------------------------------------------------------------------
+
+class TestSignalDedupAndScoring:
+
+    def test_dedup_same_topic_keeps_highest_confidence(self):
+        """Two signals with same topic+type: higher confidence wins."""
+        signals = [
+            ContradictionResult(
+                new_event_id="n", existing_event_id="a",
+                signal_type="contradiction", topic="AI", confidence=0.6,
+            ),
+            ContradictionResult(
+                new_event_id="n", existing_event_id="b",
+                signal_type="contradiction", topic="AI", confidence=0.9,
+            ),
+        ]
+        result = _dedup_signals(signals)
+        assert len(result) == 1
+        assert result[0].confidence == 0.9
+
+    def test_dedup_merges_evidence_event_ids(self):
+        """Merged signal has both existing_event_ids."""
+        signals = [
+            ContradictionResult(
+                new_event_id="n", existing_event_id="a",
+                signal_type="contradiction", topic="AI", confidence=0.6,
+            ),
+            ContradictionResult(
+                new_event_id="n", existing_event_id="b",
+                signal_type="contradiction", topic="AI", confidence=0.9,
+            ),
+        ]
+        result = _dedup_signals(signals)
+        assert "a" in result[0].evidence_event_ids
+        assert "b" in result[0].evidence_event_ids
+
+    def test_dedup_different_topics_both_kept(self):
+        """Different topics are not deduped."""
+        signals = [
+            ContradictionResult(
+                new_event_id="n", existing_event_id="a",
+                signal_type="contradiction", topic="AI", confidence=0.8,
+            ),
+            ContradictionResult(
+                new_event_id="n", existing_event_id="b",
+                signal_type="contradiction", topic="Biotech", confidence=0.7,
+            ),
+        ]
+        result = _dedup_signals(signals)
+        assert len(result) == 2
+
+    def test_scoring_contradiction_beats_bridge(self):
+        """Contradiction has higher base priority than bridge."""
+        event = _make_event(source_weight=0.5)
+        signals = [
+            ContradictionResult(
+                new_event_id="n", existing_event_id="a",
+                signal_type="bridge", topic="A", confidence=0.9,
+                evidence_event_ids=["a"],
+            ),
+            ContradictionResult(
+                new_event_id="n", existing_event_id="b",
+                signal_type="contradiction", topic="B", confidence=0.7,
+                evidence_event_ids=["b"],
+            ),
+        ]
+        result = _score_signals(signals, event)
+        assert result[0].signal_type == "contradiction"
+
+    def test_scoring_thesis_boost_applied(self):
+        """Event with thesis_links gets higher score."""
+        event_with = _make_event(thesis_links=["AI Dominance"], source_weight=0.5)
+        event_without = _make_event(thesis_links=[], source_weight=0.5)
+        signal = ContradictionResult(
+            new_event_id="n", existing_event_id="a",
+            signal_type="new_signal", topic="X", confidence=0.7,
+            evidence_event_ids=["a"],
+        )
+        import copy
+        s1 = copy.deepcopy(signal)
+        s2 = copy.deepcopy(signal)
+        _score_signals([s1], event_with)
+        _score_signals([s2], event_without)
+        assert s1.priority_score > s2.priority_score
+
+    def test_scoring_disagree_stance_boost(self):
+        """user_stance=disagree increases priority."""
+        event_disagree = _make_event(user_stance="disagree", source_weight=0.5)
+        event_none = _make_event(user_stance=None, source_weight=0.5)
+        import copy
+        signal = ContradictionResult(
+            new_event_id="n", existing_event_id="a",
+            signal_type="contradiction", topic="X", confidence=0.7,
+            evidence_event_ids=["a"],
+        )
+        s1 = copy.deepcopy(signal)
+        s2 = copy.deepcopy(signal)
+        _score_signals([s1], event_disagree)
+        _score_signals([s2], event_none)
+        assert s1.priority_score > s2.priority_score
+
+    def test_scoring_sort_order_descending(self):
+        """Results are sorted highest priority first."""
+        event = _make_event(source_weight=0.5)
+        signals = [
+            ContradictionResult(
+                new_event_id="n", existing_event_id="a",
+                signal_type="new_signal", topic="Low", confidence=0.3,
+                evidence_event_ids=["a"],
+            ),
+            ContradictionResult(
+                new_event_id="n", existing_event_id="b",
+                signal_type="contradiction", topic="High", confidence=0.9,
+                evidence_event_ids=["b"],
+            ),
+        ]
+        result = _score_signals(signals, event)
+        assert result[0].priority_score >= result[1].priority_score
+        assert result[0].signal_type == "contradiction"
+
+
+# ---------------------------------------------------------------------------
+# PushDetector.check_signals tests (Step 5)
+# ---------------------------------------------------------------------------
+
+class TestPushDetectorSignals:
+
+    def test_check_signals_contradiction_above_threshold(self):
+        """Signal with high priority_score produces a notification."""
+        storage = FakeStorage()
+        push = PushDetector(storage=storage, workspace_id="default")
+        signal = ContradictionResult(
+            new_event_id="n", existing_event_id="a",
+            signal_type="contradiction", topic="AI", summary="Conflict",
+            confidence=0.9, priority_score=0.8,
+            evidence_event_ids=["a", "b"],
+            rationale="Directly contradicts prior claim",
+        )
+        notifs = push.check_signals([signal])
+        assert len(notifs) == 1
+        assert notifs[0].trigger_type == "contradiction_detected"
+        assert notifs[0].priority == "high"
+        assert "Directly contradicts" in notifs[0].body
+
+    def test_check_signals_below_threshold_skipped(self):
+        """Signal with low priority_score is skipped."""
+        storage = FakeStorage()
+        push = PushDetector(storage=storage, workspace_id="default")
+        signal = ContradictionResult(
+            new_event_id="n", existing_event_id="a",
+            signal_type="answer", topic="X", confidence=0.3,
+            priority_score=0.3, evidence_event_ids=["a"],
+        )
+        notifs = push.check_signals([signal])
+        assert len(notifs) == 0
+
+    def test_check_signals_new_signal_always_skipped(self):
+        """new_signal type never produces a notification."""
+        storage = FakeStorage()
+        push = PushDetector(storage=storage, workspace_id="default")
+        signal = ContradictionResult(
+            new_event_id="n", existing_event_id="a",
+            signal_type="new_signal", topic="X", confidence=0.9,
+            priority_score=0.9, evidence_event_ids=["a"],
+        )
+        notifs = push.check_signals([signal])
+        assert len(notifs) == 0
+
+    @pytest.mark.asyncio
+    async def test_check_all_with_signals_merges(self):
+        """check_all with signals includes signal notifications."""
+        storage = FakeStorageWithStaleCoverage(days_since_update=60, event_count=5)
+        push = PushDetector(storage=storage, workspace_id="default")
+        signal = ContradictionResult(
+            new_event_id="n", existing_event_id="a",
+            signal_type="contradiction", topic="AI",
+            confidence=0.9, priority_score=0.8,
+            evidence_event_ids=["a"],
+        )
+        notifs = await push.check_all(signals=[signal])
+        types = {n.trigger_type for n in notifs}
+        assert "contradiction_detected" in types
+        assert "thesis_stale" in types
+
+    @pytest.mark.asyncio
+    async def test_check_all_without_signals_unchanged(self):
+        """check_all() with no signals returns only stale+momentum."""
+        storage = FakeStorageWithStaleCoverage(days_since_update=60, event_count=5)
+        push = PushDetector(storage=storage, workspace_id="default")
+        notifs = await push.check_all()
+        types = {n.trigger_type for n in notifs}
+        assert "thesis_stale" in types
+        assert "contradiction_detected" not in types
+
+
+# ---------------------------------------------------------------------------
+# Classification Audit tests
+# ---------------------------------------------------------------------------
+
+class FakeStorageForAudit(FakeStorage):
+    """Returns pre-configured events for audit testing."""
+
+    def __init__(self, events: list[KnowledgeEvent]):
+        super().__init__()
+        self._audit_events = events
+
+    async def get_events_without_classification(self, workspace_id="default", limit=50):
+        return self._audit_events[:limit]
+
+
+class TestAuditClassification:
+
+    def _make_audit_event(self, **kwargs) -> KnowledgeEvent:
+        defaults = dict(
+            id=str(uuid.uuid4()),
+            workspace_id="default",
+            type=EventType.NOTE,
+            title="Audit Event",
+            content="Some content for audit",
+            summary="Summary",
+            tags=[],
+            thesis_links=[],
+            confidence=0.7,
+            source="api",
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        defaults.update(kwargs)
+        return KnowledgeEvent(**defaults)
+
+    @pytest.mark.asyncio
+    async def test_clean_events_no_issues(self):
+        """Fully classified events should produce zero issues."""
+        from cortex.use_cases.maintenance import MaintenanceUseCase
+        # No events returned from get_events_without_classification
+        storage = FakeStorageForAudit(events=[])
+        maint = MaintenanceUseCase(storage, FakeEmbedding())
+        result = await maint.audit_classification()
+        assert result["events_checked"] == 0
+        assert all(c == 0 for c in result["issues"].values())
+
+    @pytest.mark.asyncio
+    async def test_missing_source_type(self):
+        """Events with no source_type are flagged."""
+        from cortex.use_cases.maintenance import MaintenanceUseCase
+        evt = self._make_audit_event(source_type=None, temporality="trend",
+                                     nature_tags=["claim"],
+                                     key_points=[{"text": "some valid point", "type": "claim"}])
+        storage = FakeStorageForAudit(events=[evt])
+        maint = MaintenanceUseCase(storage, FakeEmbedding())
+        result = await maint.audit_classification()
+        assert result["issues"]["missing_source_type"] == 1
+
+    @pytest.mark.asyncio
+    async def test_invalid_source_type(self):
+        """Events with unrecognized source_type are flagged."""
+        from cortex.use_cases.maintenance import MaintenanceUseCase
+        evt = self._make_audit_event(source_type="unknown_type", temporality="trend",
+                                     nature_tags=["claim"],
+                                     key_points=[{"text": "some valid point", "type": "claim"}])
+        storage = FakeStorageForAudit(events=[evt])
+        maint = MaintenanceUseCase(storage, FakeEmbedding())
+        result = await maint.audit_classification()
+        assert result["issues"]["invalid_source_type"] == 1
+
+    @pytest.mark.asyncio
+    async def test_weak_key_points_flagged(self):
+        """Events with weak key_points are flagged."""
+        from cortex.use_cases.maintenance import MaintenanceUseCase
+        evt = self._make_audit_event(
+            source_type="published", temporality="trend",
+            nature_tags=["claim"],
+            key_points=[{"text": "(no structured key points)", "type": "claim"}],
+        )
+        storage = FakeStorageForAudit(events=[evt])
+        maint = MaintenanceUseCase(storage, FakeEmbedding())
+        result = await maint.audit_classification()
+        assert result["issues"]["weak_key_points"] == 1
+
+    @pytest.mark.asyncio
+    async def test_reclassify_ids_deduped(self):
+        """event_ids_to_reclassify doesn't contain duplicates."""
+        from cortex.use_cases.maintenance import MaintenanceUseCase
+        # Event missing both source_type AND temporality
+        evt = self._make_audit_event(source_type=None, temporality=None,
+                                     nature_tags=["claim"],
+                                     key_points=[{"text": "some valid point", "type": "claim"}])
+        storage = FakeStorageForAudit(events=[evt])
+        maint = MaintenanceUseCase(storage, FakeEmbedding())
+        result = await maint.audit_classification()
+        assert len(result["event_ids_to_reclassify"]) == 1

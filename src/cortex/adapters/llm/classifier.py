@@ -2,16 +2,15 @@
 Three-dimension information classifier.
 Uses the same LLM adapter pattern as adapter.py.
 """
-
 from __future__ import annotations
 
 import json
 import re
 
-from cortex.domain.constants import SOURCE_WEIGHTS
+from cortex.domain.constants import KEY_POINT_TYPES, SOURCE_WEIGHTS
 
-CLASSIFY_PROMPT = """Analyze the following content and classify it
-along three information dimensions.
+
+CLASSIFY_PROMPT = """Analyze the following content and classify it along three information dimensions.
 Return ONLY valid JSON with these fields:
 
 1. source_type: How was this information obtained?
@@ -70,11 +69,57 @@ def parse_classification(text: str) -> dict:
             data = {}
 
     source_type = data.get("source_type", "published")
+    key_points = _validate_key_points(data.get("key_points", []))
     return {
         "source_type": source_type,
         "source_weight": SOURCE_WEIGHTS.get(source_type, 0.5),
         "nature_tags": data.get("nature_tags", []),
         "temporality": data.get("temporality", "trend"),
-        "key_points": data.get("key_points", []),
+        "key_points": key_points,
         "stance": data.get("stance", {}),
     }
+
+
+# ---------------------------------------------------------------------------
+# Key points validation
+# ---------------------------------------------------------------------------
+
+_KEY_POINTS_SENTINEL = [{"text": "(no structured key points)", "type": "claim"}]
+
+
+def _validate_key_points(raw: list) -> list[dict]:
+    """Validate and normalize key_points from LLM output."""
+    if not isinstance(raw, list):
+        return list(_KEY_POINTS_SENTINEL)
+
+    validated = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        text = item.get("text", "")
+        if not isinstance(text, str) or len(text.strip()) < 10:
+            continue
+        kp_type = item.get("type", "claim")
+        if kp_type not in KEY_POINT_TYPES:
+            kp_type = "claim"
+        validated.append({"text": text.strip(), "type": kp_type})
+
+    if not validated:
+        return list(_KEY_POINTS_SENTINEL)
+
+    return validated[:5]
+
+
+def is_weak_key_points(kps: list[dict]) -> bool:
+    """Check if key_points are too weak to be useful for signal detection."""
+    if not kps:
+        return True
+    # Check for sentinel
+    if kps == _KEY_POINTS_SENTINEL:
+        return True
+    if len(kps) == 1 and kps[0].get("text") == "(no structured key points)":
+        return True
+    # All entries have very short text
+    if all(len(kp.get("text", "")) < 15 for kp in kps):
+        return True
+    return False
