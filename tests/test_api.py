@@ -208,14 +208,14 @@ def test_thesis_evidence_returns_list(client, fake_storage):
 # Error scenarios
 # ------------------------------------------------------------------
 
-def test_ingest_empty_body_returns_422(client):
-    """POST /api/v1/events/ingest with completely empty body returns 422."""
+def test_ingest_empty_body_still_creates_event(client):
+    """POST /api/v1/events/ingest with empty body — all fields optional, text branch runs."""
     response = client.post("/api/v1/events/ingest", json={})
-    # An empty body is valid for IngestRequest (all fields optional), but no
-    # content and no url means the text branch runs with empty content.
-    # The route returns 201 with whatever was stored; check that it doesn't crash.
-    # However, if the schema enforces required fields the response will be 422.
-    assert response.status_code in (201, 400, 422)
+    # IngestRequest has all optional fields: empty body goes through text branch
+    # with empty content. This should succeed (not crash).
+    assert response.status_code == 201
+    data = response.json()
+    assert "id" in data
 
 
 def test_get_nonexistent_event_returns_404(client):
@@ -226,8 +226,8 @@ def test_get_nonexistent_event_returns_404(client):
     assert response.json()["detail"] == "Event not found"
 
 
-def test_ingest_invalid_url_handled_gracefully(fake_storage, fake_embedding, fake_llm, monkeypatch):
-    """POST /api/v1/events/ingest with an invalid URL is handled gracefully (non-200 response)."""
+def test_ingest_invalid_url_returns_500(fake_storage, fake_embedding, fake_llm, monkeypatch):
+    """POST /api/v1/events/ingest with invalid URL — use case raises, API returns 500."""
 
     class FakeLinkUseCaseRaises:
         def __init__(self, *args, **kwargs):
@@ -236,18 +236,16 @@ def test_ingest_invalid_url_handled_gracefully(fake_storage, fake_embedding, fak
         async def import_link(self, url, user_annotation=None):
             raise ValueError(f"Cannot fetch URL: {url}")
 
-    # The route does `from cortex.use_cases.ingest_link import IngestLinkUseCase`
-    # inside the function body, so we patch the module attribute directly.
     import cortex.use_cases.ingest_link as ingest_link_module
     monkeypatch.setattr(ingest_link_module, "IngestLinkUseCase", FakeLinkUseCaseRaises)
 
     from tests.conftest import _build_test_app
     app = _build_test_app(fake_storage, fake_embedding, fake_llm)
-    # raise_server_exceptions=False so 500 is returned as a response, not raised
     error_client = TestClient(app, raise_server_exceptions=False)
 
     response = error_client.post(
         "/api/v1/events/ingest",
         json={"url": "not-a-real-url"},
     )
-    assert response.status_code in (400, 422, 500)
+    # Unhandled ValueError in route → 500 Internal Server Error
+    assert response.status_code == 500

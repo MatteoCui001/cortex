@@ -8,7 +8,7 @@ You feed it articles, notes, voice memos, meeting transcripts, and files from wh
 
 ## Current Status
 
-**Phase 1 ~95% | Phase 2 ~80% | Phase 3 ~30%.** 109 automated tests passing.
+**Phase 1 ~95% | Phase 2 ~80% | Phase 3 ~30%.** 147 automated tests passing.
 
 Working features:
 - Obsidian vault import + incremental sync
