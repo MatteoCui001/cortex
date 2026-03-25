@@ -196,6 +196,17 @@ class TestCommandDispatch:
                 main()
         mock_signals.assert_awaited_once()
 
+    def test_parser_accepts_feedback(self):
+        """'feedback <id> useful' dispatches to _cmd_feedback."""
+        with self._patch_cmd("_cmd_feedback") as mock_fb:
+            with patch.object(
+                sys, "argv",
+                ["cortex", "feedback", "some-signal-id", "useful"],
+            ):
+                from cortex.cli.main import main
+                main()
+        mock_fb.assert_awaited_once()
+
     def test_parser_accepts_signals_event_id(self):
         """'signals --event-id abc' dispatches to _cmd_signals."""
         with self._patch_cmd("_cmd_signals") as mock_signals:
@@ -230,6 +241,7 @@ class TestHelpOutput:
         "annotate",
         "notifications",
         "signals",
+        "feedback",
     ]
 
     def _capture_help(self) -> str:

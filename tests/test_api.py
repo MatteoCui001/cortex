@@ -3,20 +3,20 @@ Integration tests for the Cortex REST API.
 
 Uses TestClient with fake adapters — no real database or LLM required.
 """
-
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 
+import pytest
 from fastapi.testclient import TestClient
 
 from cortex.domain.entities import EventType, KnowledgeEvent
+from datetime import datetime, timezone
+
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
-
 
 def _make_event(**kwargs) -> KnowledgeEvent:
     defaults = dict(
@@ -40,7 +40,6 @@ def _make_event(**kwargs) -> KnowledgeEvent:
 # ------------------------------------------------------------------
 # Happy-path tests
 # ------------------------------------------------------------------
-
 
 def test_stats_returns_valid_structure(client):
     """GET /api/v1/stats returns a dict with event count fields."""
@@ -93,6 +92,8 @@ def test_ingest_text_creates_event_returns_201(client):
 def test_ingest_url_creates_event_returns_201(client, fake_storage, monkeypatch):
     """POST /api/v1/events/ingest with a URL triggers the link pipeline and returns 201."""
     # Patch IngestLinkUseCase so we don't hit the network
+    from cortex.domain.entities import KnowledgeEvent, EventType
+    from datetime import datetime, timezone
 
     dummy_event = _make_event(title="Fetched Article", source="link")
 
@@ -103,6 +104,7 @@ def test_ingest_url_creates_event_returns_201(client, fake_storage, monkeypatch)
         async def import_link(self, url, user_annotation=None):
             return dummy_event
 
+    import cortex.api.routes as routes_module
     monkeypatch.setattr(
         "cortex.use_cases.ingest_link.IngestLinkUseCase",
         FakeLinkUseCase,
@@ -206,7 +208,6 @@ def test_thesis_evidence_returns_list(client, fake_storage):
 # Error scenarios
 # ------------------------------------------------------------------
 
-
 def test_ingest_empty_body_still_creates_event(client):
     """POST /api/v1/events/ingest with empty body — all fields optional, text branch runs."""
     response = client.post("/api/v1/events/ingest", json={})
@@ -236,11 +237,9 @@ def test_ingest_invalid_url_returns_500(fake_storage, fake_embedding, fake_llm, 
             raise ValueError(f"Cannot fetch URL: {url}")
 
     import cortex.use_cases.ingest_link as ingest_link_module
-
     monkeypatch.setattr(ingest_link_module, "IngestLinkUseCase", FakeLinkUseCaseRaises)
 
     from tests.conftest import _build_test_app
-
     app = _build_test_app(fake_storage, fake_embedding, fake_llm)
     error_client = TestClient(app, raise_server_exceptions=False)
 
@@ -250,3 +249,75 @@ def test_ingest_invalid_url_returns_500(fake_storage, fake_embedding, fake_llm, 
     )
     # Unhandled ValueError in route → 500 Internal Server Error
     assert response.status_code == 500
+
+
+# ------------------------------------------------------------------
+# Phase 3.6: Signal API tests
+# ------------------------------------------------------------------
+
+class TestSignalAPI:
+
+    def test_get_signals_returns_empty_list(self, client):
+        response = client.get("/api/v1/signals")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_get_signals_returns_persisted(self, client, fake_storage):
+        from cortex.domain.entities import ContradictionResult
+        sig = ContradictionResult(
+            new_event_id="evt-1", existing_event_id="evt-2",
+            signal_type="contradiction", topic="rates",
+            priority_score=0.8, workspace_id="default",
+        )
+        import asyncio
+        asyncio.run(fake_storage.upsert_signal(sig))
+        response = client.get("/api/v1/signals")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["signal_type"] == "contradiction"
+
+    def test_get_signals_filtered_by_event_id(self, client, fake_storage):
+        from cortex.domain.entities import ContradictionResult
+        import asyncio
+        sig1 = ContradictionResult(
+            new_event_id="evt-1", existing_event_id="evt-x",
+            signal_type="answer", workspace_id="default",
+        )
+        sig2 = ContradictionResult(
+            new_event_id="evt-2", existing_event_id="evt-x",
+            signal_type="bridge", workspace_id="default",
+        )
+        asyncio.run(fake_storage.upsert_signal(sig1))
+        asyncio.run(fake_storage.upsert_signal(sig2))
+        response = client.get("/api/v1/signals?event_id=evt-1")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+
+    def test_submit_feedback_returns_201(self, client, fake_storage):
+        from cortex.domain.entities import ContradictionResult
+        import asyncio
+        sig = ContradictionResult(
+            new_event_id="e1", existing_event_id="e2",
+            signal_type="contradiction", topic="AI",
+            workspace_id="default",
+        )
+        asyncio.run(fake_storage.upsert_signal(sig))
+        response = client.post(
+            f"/api/v1/signals/{sig.id}/feedback",
+            json={"verdict": "useful"},
+        )
+        assert response.status_code == 201
+        assert response.json()["verdict"] == "useful"
+
+    def test_submit_feedback_rejects_invalid_verdict(self, client):
+        response = client.post(
+            "/api/v1/signals/fake-id/feedback",
+            json={"verdict": "maybe"},
+        )
+        assert response.status_code == 422
+
+    def test_thesis_feedback_stats_returns_list(self, client):
+        response = client.get("/api/v1/signals/thesis-feedback")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)

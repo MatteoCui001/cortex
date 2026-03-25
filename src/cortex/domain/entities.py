@@ -160,6 +160,22 @@ class ContradictionResult:
     evidence_event_ids: list[str] = field(default_factory=list)
     rationale: Optional[str] = None
     evidence_strength: Optional[str] = None  # strong|moderate|weak
+    # Phase 3.6: Persistence fields
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str = "default"
+    created_at: Optional[datetime] = None
+    thesis_links: list[str] = field(default_factory=list)
+
+
+@dataclass
+class SignalFeedback:
+    """User feedback on a persisted signal."""
+    signal_id: str
+    verdict: str   # useful|not_useful|wrong|save_for_later
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str = "default"
+    note: Optional[str] = None
+    created_at: Optional[datetime] = None
 
 
 @dataclass

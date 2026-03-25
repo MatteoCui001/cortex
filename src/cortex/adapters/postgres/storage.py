@@ -10,8 +10,8 @@ from typing import Optional
 import asyncpg
 
 from cortex.domain.entities import (
-    Entity, EntityType, EventType, KnowledgeEvent, Relation, RelationType,
-    SearchResult, ThesisCoverage,
+    ContradictionResult, Entity, EntityType, EventType, KnowledgeEvent,
+    Relation, RelationType, SearchResult, SignalFeedback, ThesisCoverage,
 )
 from cortex.domain.ports import StoragePort
 
@@ -664,6 +664,128 @@ class PostgresStorage(StoragePort):
             temporality, json.dumps(key_points), json.dumps(stance), event_id,
         )
 
+    # ------------------------------------------------------------------
+    # Phase 3.6: Signal operations
+    # ------------------------------------------------------------------
+
+    async def upsert_signal(self, signal: ContradictionResult) -> str:
+        sql = """
+        INSERT INTO signals (
+            id, workspace_id, new_event_id, existing_event_id,
+            signal_type, topic, summary, confidence, priority_score,
+            evidence_event_ids, rationale, evidence_strength, thesis_links
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+        ON CONFLICT (id) DO UPDATE SET
+            priority_score = EXCLUDED.priority_score,
+            summary = COALESCE(EXCLUDED.summary, signals.summary)
+        RETURNING id
+        """
+        row = await self._pool.fetchrow(
+            sql,
+            signal.id, signal.workspace_id,
+            signal.new_event_id, signal.existing_event_id,
+            signal.signal_type, signal.topic, signal.summary,
+            signal.confidence, signal.priority_score,
+            json.dumps(signal.evidence_event_ids),
+            signal.rationale, signal.evidence_strength,
+            json.dumps(signal.thesis_links),
+        )
+        return str(row["id"])
+
+    async def get_signals(
+        self,
+        workspace_id: str,
+        *,
+        event_id: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[ContradictionResult]:
+        if event_id:
+            sql = """
+            SELECT * FROM signals
+            WHERE workspace_id = $1 AND new_event_id = $2::uuid
+            ORDER BY priority_score DESC LIMIT $3
+            """
+            rows = await self._pool.fetch(sql, workspace_id, event_id, limit)
+        else:
+            sql = """
+            SELECT * FROM signals
+            WHERE workspace_id = $1
+            ORDER BY created_at DESC LIMIT $2
+            """
+            rows = await self._pool.fetch(sql, workspace_id, limit)
+        return [_row_to_signal(row) for row in rows]
+
+    async def create_signal_feedback(self, feedback: SignalFeedback) -> str:
+        sql = """
+        INSERT INTO signal_feedback (
+            id, workspace_id, signal_id, verdict, note,
+            signal_type, topic_normalized, thesis_link
+        )
+        SELECT $1, $2, $3, $4, $5,
+               s.signal_type, lower(trim(s.topic)), s.thesis_links->>0
+        FROM signals s WHERE s.id = $3
+        RETURNING id
+        """
+        row = await self._pool.fetchrow(
+            sql,
+            feedback.id, feedback.workspace_id,
+            feedback.signal_id, feedback.verdict, feedback.note,
+        )
+        return str(row["id"])
+
+    async def get_feedback_summary(
+        self,
+        workspace_id: str,
+    ) -> dict[tuple[str, str], dict]:
+        sql = """
+        SELECT signal_type, topic_normalized,
+            SUM(CASE WHEN verdict='useful' THEN 1 ELSE 0 END) AS useful,
+            SUM(CASE WHEN verdict='not_useful' THEN 1 ELSE 0 END) AS not_useful,
+            SUM(CASE WHEN verdict='wrong' THEN 1 ELSE 0 END) AS wrong,
+            SUM(CASE WHEN verdict='save_for_later' THEN 1 ELSE 0 END) AS save_for_later
+        FROM signal_feedback
+        WHERE workspace_id = $1
+        GROUP BY signal_type, topic_normalized
+        """
+        rows = await self._pool.fetch(sql, workspace_id)
+        result = {}
+        for r in rows:
+            key = (r["signal_type"], r["topic_normalized"] or "")
+            result[key] = {
+                "useful": r["useful"],
+                "not_useful": r["not_useful"],
+                "wrong": r["wrong"],
+                "save_for_later": r["save_for_later"],
+            }
+        return result
+
+    async def get_thesis_feedback_stats(
+        self,
+        workspace_id: str,
+    ) -> list[dict]:
+        sql = """
+        SELECT thesis_link,
+            SUM(CASE WHEN verdict='useful' THEN 1 ELSE 0 END) AS useful,
+            SUM(CASE WHEN verdict='not_useful' THEN 1 ELSE 0 END) AS not_useful,
+            SUM(CASE WHEN verdict='wrong' THEN 1 ELSE 0 END) AS wrong
+        FROM signal_feedback
+        WHERE workspace_id = $1 AND thesis_link IS NOT NULL
+        GROUP BY thesis_link
+        ORDER BY (SUM(CASE WHEN verdict='useful' THEN 1 ELSE 0 END)
+                + SUM(CASE WHEN verdict='not_useful' THEN 1 ELSE 0 END)
+                + SUM(CASE WHEN verdict='wrong' THEN 1 ELSE 0 END)) DESC
+        """
+        rows = await self._pool.fetch(sql, workspace_id)
+        return [
+            {
+                "thesis_link": r["thesis_link"],
+                "useful": r["useful"],
+                "not_useful": r["not_useful"],
+                "wrong": r["wrong"],
+            }
+            for r in rows
+        ]
+
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
@@ -722,4 +844,26 @@ def _row_to_event(row: asyncpg.Record) -> KnowledgeEvent:
         expires_at=_safe_col(row, "expires_at"),
         user_annotation=_safe_col(row, "user_annotation"),
         user_stance=_safe_col(row, "user_stance"),
+    )
+
+
+def _row_to_signal(row: asyncpg.Record) -> ContradictionResult:
+    """Convert a database row to a ContradictionResult."""
+    evidence = _safe_json_col(row, "evidence_event_ids", [])
+    thesis = _safe_json_col(row, "thesis_links", [])
+    return ContradictionResult(
+        new_event_id=str(row["new_event_id"]),
+        existing_event_id=str(row["existing_event_id"]),
+        signal_type=row["signal_type"],
+        topic=row["topic"],
+        summary=row["summary"],
+        confidence=float(row["confidence"]),
+        priority_score=float(row["priority_score"]),
+        evidence_event_ids=evidence,
+        rationale=_safe_col(row, "rationale"),
+        evidence_strength=_safe_col(row, "evidence_strength"),
+        id=str(row["id"]),
+        workspace_id=row["workspace_id"],
+        created_at=row["created_at"],
+        thesis_links=thesis,
     )
