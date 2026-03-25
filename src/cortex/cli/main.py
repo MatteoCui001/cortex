@@ -135,6 +135,8 @@ def main():
         asyncio.run(_cmd_signals())
     elif command == "feedback":
         asyncio.run(_cmd_feedback())
+    elif command == "inbox":
+        asyncio.run(_cmd_inbox())
     elif command in ("--help", "-h", "help"):
         _print_help()
     else:
@@ -164,6 +166,11 @@ Commands:
   notifications     Show proactive push notifications
   signals           Analyze signals for recent events (--event-id ID | --recent N)
   feedback <id> <v> Submit feedback on a signal (useful|not_useful|wrong|save_for_later)
+  inbox             View and manage persistent notifications
+                    inbox [--status S] [--limit N]  List notifications
+                    inbox read <id>                 Mark as read
+                    inbox ack <id>                  Mark as acknowledged
+                    inbox dismiss <id>              Dismiss notification
 
 Options:
   --force           Re-import all files (skip_existing=False)
@@ -534,7 +541,7 @@ async def _cmd_import_link():
 
 
 async def _analyze_contradictions(ingest, event, storage):
-    """Run contradiction detection, persist signals, and print results."""
+    """Run contradiction detection, persist signals, generate notifications."""
     signals = await ingest.post_ingest_analyze(event)
     if signals:
         # Persist signals
@@ -552,6 +559,18 @@ async def _analyze_contradictions(ingest, event, storage):
             if s.evidence_strength:
                 ids = ", ".join(s.evidence_event_ids[:3])
                 print(f"      Strength: {s.evidence_strength} | Events: [{ids}]")
+        # Generate notifications from signals
+        try:
+            from cortex.use_cases.push_detector import PushDetector
+            from cortex.use_cases.notification_manager import NotificationManager
+            workspace = ingest._workspace_id
+            detector = PushDetector(storage, workspace)
+            manager = NotificationManager(storage, detector, workspace_id=workspace)
+            new_notifs = await manager.process(signals=signals)
+            if new_notifs:
+                print(f"\n  {len(new_notifs)} new notification(s). Run 'cortex inbox' to view.")
+        except Exception:
+            pass  # notification generation is best-effort
     return signals
 
 
@@ -757,13 +776,13 @@ async def _cmd_signals():
                 ids = ", ".join(s.evidence_event_ids[:3])
                 print(f"    Strength: {strength} | Events: [{ids}]")
 
-            # Show which would become notifications
-            notifs = push.check_signals(signals)
-            if notifs:
-                print(
-                    f"  -> {len(notifs)} notification(s) "
-                    f"would be generated"
-                )
+            # Generate persistent notifications from signals
+            if signals:
+                from cortex.use_cases.notification_manager import NotificationManager
+                manager = NotificationManager(storage, push, workspace_id=workspace)
+                new_notifs = await manager.process(signals=signals)
+                if new_notifs:
+                    print(f"  -> {len(new_notifs)} new notification(s). Run 'cortex inbox' to view.")
     finally:
         await storage.close()
 
@@ -803,6 +822,86 @@ async def _cmd_feedback():
         print(f"Feedback recorded (id={fid[:8]}..., verdict={verdict})")
         if note:
             print(f"  Note: {note}")
+    finally:
+        await storage.close()
+
+
+async def _cmd_inbox():
+    """View and manage persistent notifications."""
+    cfg = load_config()
+    storage, _ = await _init_storage_only(cfg)
+    workspace = cfg.get("workspace", "default")
+
+    try:
+        from cortex.use_cases.push_detector import PushDetector
+        from cortex.use_cases.notification_manager import NotificationManager
+
+        detector = PushDetector(storage, workspace)
+        manager = NotificationManager(storage, detector, workspace_id=workspace)
+
+        # Parse subcommand: inbox [read|ack|dismiss] [id] [--status S] [--limit N]
+        args = sys.argv[2:]
+        if args and args[0] in ("read", "ack", "dismiss"):
+            action = args[0]
+            if len(args) < 2:
+                print(f"Usage: cortex inbox {action} <notification-id>")
+                sys.exit(1)
+            nid = args[1]
+            from cortex.domain.entities import NotificationStatus
+            status_map = {
+                "read": NotificationStatus.READ,
+                "ack": NotificationStatus.ACKED,
+                "dismiss": NotificationStatus.DISMISSED,
+            }
+            try:
+                await manager.transition(nid, status_map[action])
+                print(f"Notification {nid[:7]} marked as {action}.")
+            except ValueError as exc:
+                print(f"Error: {exc}")
+                sys.exit(1)
+            return
+
+        # List mode
+        status_filter = None
+        limit = 50
+        for i, arg in enumerate(args):
+            if arg == "--status" and i + 1 < len(args):
+                status_filter = args[i + 1]
+            if arg == "--limit" and i + 1 < len(args):
+                limit = int(args[i + 1])
+
+        notifications = await storage.get_notifications(
+            workspace, status=status_filter, limit=limit,
+        )
+
+        if not notifications:
+            print("No notifications.")
+            return
+
+        print(f"\n{'='*60}")
+        print(f"  Cortex Inbox ({len(notifications)} notification{'s' if len(notifications) != 1 else ''})")
+        print(f"{'='*60}")
+
+        for n in notifications:
+            priority_marker = {"high": "!!!", "medium": " ! ", "low": "   "}.get(n.priority, "   ")
+            short_id = n.id[:7]
+            age = ""
+            if n.created_at:
+                from datetime import datetime, timezone as tz
+                delta = datetime.now(tz.utc) - n.created_at
+                if delta.days > 0:
+                    age = f"{delta.days} day{'s' if delta.days != 1 else ''} ago"
+                else:
+                    hours = delta.seconds // 3600
+                    if hours > 0:
+                        age = f"{hours} hour{'s' if hours != 1 else ''} ago"
+                    else:
+                        age = "just now"
+            status_str = f"[{n.status.value}]" if n.status.value != "pending" else ""
+            print(f"\n  [{priority_marker}] {short_id}  {n.title} {status_str}")
+            print(f"        {n.source_kind} -- {age}")
+
+        print(f"\n{'='*60}")
     finally:
         await storage.close()
 

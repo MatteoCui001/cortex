@@ -2,6 +2,8 @@
 import uuid
 from datetime import datetime
 
+import pytest
+
 from cortex.domain.entities import (
     Annotation,
     ContradictionResult,
@@ -9,10 +11,14 @@ from cortex.domain.entities import (
     EntityType,
     EventType,
     KnowledgeEvent,
+    Notification,
+    NotificationChannel,
+    NotificationStatus,
     PushNotification,
     Relation,
     RelationType,
     SignalFeedback,
+    VALID_TRANSITIONS,
 )
 
 
@@ -293,3 +299,95 @@ def test_signal_feedback_defaults():
     assert fb.workspace_id == "default"
     assert fb.note is None
     assert fb.created_at is None
+
+
+# ---------------------------------------------------------------------------
+# Notification (Phase 4)
+# ---------------------------------------------------------------------------
+
+def test_notification_default_id_is_uuid():
+    n = Notification(title="T", body="B", source_kind="signal")
+    uuid.UUID(n.id)
+
+
+def test_notification_dedup_key_defaults_from_source():
+    n = Notification(title="T", body="B", source_kind="signal", source_id="abc")
+    assert n.dedup_key == "signal:abc"
+
+
+def test_notification_dedup_key_explicit_overrides_default():
+    n = Notification(title="T", body="B", source_kind="signal", dedup_key="custom:key")
+    assert n.dedup_key == "custom:key"
+
+
+def test_notification_created_at_auto_set():
+    n = Notification(title="T", body="B", source_kind="signal")
+    assert isinstance(n.created_at, datetime)
+    assert n.created_at.tzinfo is not None
+
+
+def test_notification_default_status_pending():
+    n = Notification(title="T", body="B", source_kind="signal")
+    assert n.status == NotificationStatus.PENDING
+
+
+def test_notification_default_channel_inbox():
+    n = Notification(title="T", body="B", source_kind="signal")
+    assert n.channel == NotificationChannel.INBOX
+
+
+class TestNotificationStateMachine:
+
+    def test_pending_to_delivered(self):
+        n = Notification(title="T", body="B", source_kind="signal")
+        n.transition(NotificationStatus.DELIVERED)
+        assert n.status == NotificationStatus.DELIVERED
+
+    def test_pending_to_acked(self):
+        n = Notification(title="T", body="B", source_kind="signal")
+        n.transition(NotificationStatus.ACKED)
+        assert n.status == NotificationStatus.ACKED
+
+    def test_pending_to_dismissed(self):
+        n = Notification(title="T", body="B", source_kind="signal")
+        n.transition(NotificationStatus.DISMISSED)
+        assert n.status == NotificationStatus.DISMISSED
+
+    def test_pending_to_failed(self):
+        n = Notification(title="T", body="B", source_kind="signal")
+        n.transition(NotificationStatus.FAILED)
+        assert n.status == NotificationStatus.FAILED
+
+    def test_delivered_to_read(self):
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.DELIVERED)
+        n.transition(NotificationStatus.READ)
+        assert n.status == NotificationStatus.READ
+
+    def test_read_to_acked(self):
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.READ)
+        n.transition(NotificationStatus.ACKED)
+        assert n.status == NotificationStatus.ACKED
+
+    def test_invalid_acked_to_pending_raises(self):
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.ACKED)
+        with pytest.raises(ValueError, match="Cannot transition"):
+            n.transition(NotificationStatus.PENDING)
+
+    def test_invalid_dismissed_to_read_raises(self):
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.DISMISSED)
+        with pytest.raises(ValueError, match="Cannot transition"):
+            n.transition(NotificationStatus.READ)
+
+    def test_invalid_failed_to_delivered_raises(self):
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.FAILED)
+        with pytest.raises(ValueError, match="Cannot transition"):
+            n.transition(NotificationStatus.DELIVERED)
+
+    def test_all_terminal_states_have_no_transitions(self):
+        for status in (NotificationStatus.ACKED, NotificationStatus.DISMISSED, NotificationStatus.FAILED):
+            assert VALID_TRANSITIONS[status] == set()

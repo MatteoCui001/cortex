@@ -43,3 +43,10 @@ SIGNAL_TYPE_BASE_PRIORITY: dict[str, float] = {
 SIGNAL_FEEDBACK_VERDICTS = frozenset([
     "useful", "not_useful", "wrong", "save_for_later",
 ])
+
+# Phase 4: Notification constants
+NOTIFICATION_STATUSES = frozenset([
+    "pending", "delivered", "read", "acked", "dismissed", "failed",
+])
+NOTIFICATION_CHANNELS = frozenset(["inbox", "webhook"])
+PRIORITY_ORDER: dict[str, int] = {"low": 0, "medium": 1, "high": 2}

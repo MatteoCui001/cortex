@@ -218,6 +218,50 @@ class TestCommandDispatch:
                 main()
         mock_signals.assert_awaited_once()
 
+    # ------------------------------------------------------------------
+    # inbox
+    # ------------------------------------------------------------------
+    def test_parser_accepts_inbox(self):
+        """'inbox' dispatches to _cmd_inbox."""
+        with self._patch_cmd("_cmd_inbox") as mock_inbox:
+            with patch.object(sys, "argv", ["cortex", "inbox"]):
+                from cortex.cli.main import main
+                main()
+        mock_inbox.assert_awaited_once()
+
+    def test_parser_accepts_inbox_read(self):
+        """'inbox read <id>' dispatches to _cmd_inbox."""
+        with self._patch_cmd("_cmd_inbox") as mock_inbox:
+            with patch.object(
+                sys, "argv",
+                ["cortex", "inbox", "read", "some-notif-id"],
+            ):
+                from cortex.cli.main import main
+                main()
+        mock_inbox.assert_awaited_once()
+
+    def test_parser_accepts_inbox_ack(self):
+        """'inbox ack <id>' dispatches to _cmd_inbox."""
+        with self._patch_cmd("_cmd_inbox") as mock_inbox:
+            with patch.object(
+                sys, "argv",
+                ["cortex", "inbox", "ack", "some-notif-id"],
+            ):
+                from cortex.cli.main import main
+                main()
+        mock_inbox.assert_awaited_once()
+
+    def test_parser_accepts_inbox_dismiss(self):
+        """'inbox dismiss <id>' dispatches to _cmd_inbox."""
+        with self._patch_cmd("_cmd_inbox") as mock_inbox:
+            with patch.object(
+                sys, "argv",
+                ["cortex", "inbox", "dismiss", "some-notif-id"],
+            ):
+                from cortex.cli.main import main
+                main()
+        mock_inbox.assert_awaited_once()
+
 
 # ---------------------------------------------------------------------------
 # Help output tests
@@ -242,6 +286,7 @@ class TestHelpOutput:
         "notifications",
         "signals",
         "feedback",
+        "inbox",
     ]
 
     def _capture_help(self) -> str:

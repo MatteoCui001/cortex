@@ -3,6 +3,9 @@ from cortex.domain.constants import (
     EVENT_TYPES,
     KEY_POINT_TYPES,
     NATURE_TAGS,
+    NOTIFICATION_CHANNELS,
+    NOTIFICATION_STATUSES,
+    PRIORITY_ORDER,
     RAW_INPUT_TYPES,
     SIGNAL_FEEDBACK_VERDICTS,
     SIGNAL_TYPE_BASE_PRIORITY,
@@ -113,3 +116,21 @@ def test_signal_type_priority_ordering():
 def test_signal_feedback_verdicts_expected_members():
     for v in ("useful", "not_useful", "wrong", "save_for_later"):
         assert v in SIGNAL_FEEDBACK_VERDICTS
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Notification constants
+# ---------------------------------------------------------------------------
+
+def test_notification_statuses_expected_members():
+    for s in ("pending", "delivered", "read", "acked", "dismissed", "failed"):
+        assert s in NOTIFICATION_STATUSES
+
+
+def test_notification_channels_expected_members():
+    for c in ("inbox", "webhook"):
+        assert c in NOTIFICATION_CHANNELS
+
+
+def test_priority_order_low_lt_medium_lt_high():
+    assert PRIORITY_ORDER["low"] < PRIORITY_ORDER["medium"] < PRIORITY_ORDER["high"]
