@@ -12,6 +12,7 @@ dependencies = [
     "pyyaml>=6.0",
     "pydantic>=2.10.0",
     "httpx>=0.28.1",
+    "trafilatura>=2.0",
 ]
 
 [project.optional-dependencies]
@@ -20,7 +21,6 @@ local-embeddings = [
     "torch>=2.5,<2.7",
 ]
 document-extraction = [
-    "trafilatura",
     "pymupdf",
     "pdfplumber",
     "python-docx",

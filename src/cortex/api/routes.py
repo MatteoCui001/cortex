@@ -251,20 +251,27 @@ async def digest(request: Request, days: int = 1):
 @router.post("/events/ingest", response_model=EventResponse, status_code=201)
 async def ingest_event(body: IngestRequest, request: Request):
     """Unified ingest endpoint: text or link."""
-    ingest_uc = request.app.state.ingest
+    workspace = body.workspace_id or request.app.state.workspace
 
     if body.url:
         from cortex.use_cases.ingest_link import IngestLinkUseCase
         link_uc = IngestLinkUseCase(
             request.app.state.storage,
             request.app.state.embedding,
-            getattr(ingest_uc, "_llm", None),
-            getattr(request.app.state, "file_store", None),
-            body.workspace_id,
+            request.app.state.llm,
+            request.app.state.file_store,
+            workspace,
         )
         event = await link_uc.import_link(body.url, user_annotation=body.user_annotation)
     else:
-        event = await ingest_uc.import_text(
+        from cortex.use_cases.ingest import IngestUseCase
+        text_uc = IngestUseCase(
+            request.app.state.storage,
+            request.app.state.embedding,
+            request.app.state.llm,
+            workspace,
+        )
+        event = await text_uc.import_text(
             title=body.title,
             content=body.content or "",
             source=body.source,

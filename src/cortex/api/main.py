@@ -9,6 +9,7 @@ import yaml
 from fastapi import FastAPI
 
 from cortex.adapters.embeddings.local import LocalEmbedding
+from cortex.adapters.filestore.store import FileStore
 from cortex.adapters.llm.adapter import OpenRouterLLM
 from cortex.adapters.postgres.storage import PostgresStorage
 from cortex.api.routes import router
@@ -54,10 +55,16 @@ async def lifespan(app: FastAPI):
             thesis_list=llm_cfg.get("thesis_list"),
         )
 
+    # Initialize file store
+    fs_root = cfg.get("file_store", {}).get("root")
+    file_store = FileStore(root=fs_root) if fs_root else None
+
     # Initialize use cases
     app.state.storage = storage
     app.state.embedding = embedding
-    app.state.file_store = None
+    app.state.llm = llm
+    app.state.file_store = file_store
+    app.state.workspace = workspace
     app.state.ingest = IngestUseCase(storage, embedding, llm, workspace)
     app.state.search = SearchUseCase(storage, embedding, workspace)
     app.state.analyze = AnalyzeUseCase(storage, workspace)
