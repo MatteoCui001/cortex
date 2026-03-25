@@ -4,6 +4,7 @@ from cortex.domain.constants import (
     KEY_POINT_TYPES,
     NATURE_TAGS,
     RAW_INPUT_TYPES,
+    SIGNAL_FEEDBACK_VERDICTS,
     SIGNAL_TYPE_BASE_PRIORITY,
     SIGNAL_TYPES,
     SOURCE_TYPES,
@@ -107,3 +108,8 @@ def test_signal_type_priority_ordering():
     assert SIGNAL_TYPE_BASE_PRIORITY["answer"] > SIGNAL_TYPE_BASE_PRIORITY["bridge"]
     assert SIGNAL_TYPE_BASE_PRIORITY["bridge"] > SIGNAL_TYPE_BASE_PRIORITY["new_signal"]
     assert SIGNAL_TYPE_BASE_PRIORITY["new_signal"] > SIGNAL_TYPE_BASE_PRIORITY["redundant"]
+
+
+def test_signal_feedback_verdicts_expected_members():
+    for v in ("useful", "not_useful", "wrong", "save_for_later"):
+        assert v in SIGNAL_FEEDBACK_VERDICTS

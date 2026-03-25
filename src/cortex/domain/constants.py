@@ -38,3 +38,8 @@ SIGNAL_TYPE_BASE_PRIORITY: dict[str, float] = {
     "new_signal": 0.4,
     "redundant": 0.0,
 }
+
+# Signal feedback verdict types
+SIGNAL_FEEDBACK_VERDICTS = frozenset([
+    "useful", "not_useful", "wrong", "save_for_later",
+])

@@ -12,6 +12,7 @@ from cortex.domain.entities import (
     PushNotification,
     Relation,
     RelationType,
+    SignalFeedback,
 )
 
 
@@ -249,3 +250,46 @@ def test_push_notification_created_at_is_timezone_aware():
         trigger_type="thesis_stale", title="Test", body="Test body"
     )
     assert notif.created_at.tzinfo is not None
+
+
+# ---------------------------------------------------------------------------
+# ContradictionResult persistence fields (Phase 3.6)
+# ---------------------------------------------------------------------------
+
+def test_contradiction_result_has_stable_uuid_id():
+    cr = ContradictionResult(
+        new_event_id="a", existing_event_id="b", signal_type="contradiction"
+    )
+    uuid.UUID(cr.id)  # valid UUID
+
+
+def test_contradiction_result_ids_are_unique():
+    cr1 = ContradictionResult(new_event_id="a", existing_event_id="b", signal_type="contradiction")
+    cr2 = ContradictionResult(new_event_id="a", existing_event_id="b", signal_type="contradiction")
+    assert cr1.id != cr2.id
+
+
+def test_contradiction_result_default_workspace_id():
+    cr = ContradictionResult(new_event_id="a", existing_event_id="b", signal_type="answer")
+    assert cr.workspace_id == "default"
+
+
+def test_contradiction_result_thesis_links_default_empty():
+    cr = ContradictionResult(new_event_id="a", existing_event_id="b", signal_type="bridge")
+    assert cr.thesis_links == []
+
+
+# ---------------------------------------------------------------------------
+# SignalFeedback (Phase 3.6)
+# ---------------------------------------------------------------------------
+
+def test_signal_feedback_default_id_is_uuid():
+    fb = SignalFeedback(signal_id="sig-1", verdict="useful")
+    uuid.UUID(fb.id)
+
+
+def test_signal_feedback_defaults():
+    fb = SignalFeedback(signal_id="sig-1", verdict="wrong")
+    assert fb.workspace_id == "default"
+    assert fb.note is None
+    assert fb.created_at is None

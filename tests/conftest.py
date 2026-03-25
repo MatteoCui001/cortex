@@ -2,7 +2,6 @@
 Shared fixtures for the Cortex test suite.
 Provides fake adapters and a TestClient wired with them.
 """
-
 from __future__ import annotations
 
 import uuid
@@ -16,9 +15,11 @@ from fastapi.testclient import TestClient
 from cortex.api.routes import router
 from cortex.domain.entities import (
     Annotation,
-    EventType,
+    ContradictionResult,
     KnowledgeEvent,
+    EventType,
     SearchResult,
+    SignalFeedback,
     ThesisCoverage,
 )
 from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
@@ -26,10 +27,10 @@ from cortex.use_cases.analyze import AnalyzeUseCase
 from cortex.use_cases.ingest import IngestUseCase
 from cortex.use_cases.search import SearchUseCase
 
+
 # ------------------------------------------------------------------
 # Fake adapters
 # ------------------------------------------------------------------
-
 
 class FakeStorage(StoragePort):
     """In-memory storage for tests."""
@@ -37,6 +38,8 @@ class FakeStorage(StoragePort):
     def __init__(self):
         self._events: dict[str, KnowledgeEvent] = {}
         self._annotations: list[Annotation] = []
+        self._signals: list[ContradictionResult] = []
+        self._signal_feedback: list[SignalFeedback] = []
 
     def _make_event(self, **kwargs) -> KnowledgeEvent:
         defaults = dict(
@@ -70,22 +73,18 @@ class FakeStorage(StoragePort):
 
     # --- reads ---
 
-    async def get_event(
-        self, event_id: str, workspace_id: str = "default"
-    ) -> Optional[KnowledgeEvent]:
+    async def get_event(self, event_id: str, workspace_id: str = "default") -> Optional[KnowledgeEvent]:
         return self._events.get(event_id)
 
-    async def semantic_search(
-        self, embedding, *, workspace_id="default", limit=10, type_filter=None, min_score=0.0
-    ) -> list[SearchResult]:
+    async def semantic_search(self, embedding, *, workspace_id="default", limit=10,
+                              type_filter=None, min_score=0.0) -> list[SearchResult]:
         results = []
         for ev in list(self._events.values())[:limit]:
             results.append(SearchResult(event=ev, score=0.9, match_type="semantic"))
         return results
 
-    async def fulltext_search(
-        self, query, *, workspace_id="default", limit=10, type_filter=None
-    ) -> list[SearchResult]:
+    async def fulltext_search(self, query, *, workspace_id="default", limit=10,
+                              type_filter=None) -> list[SearchResult]:
         results = []
         for ev in list(self._events.values())[:limit]:
             results.append(SearchResult(event=ev, score=0.8, match_type="fulltext"))
@@ -97,9 +96,7 @@ class FakeStorage(StoragePort):
     async def get_relations_for(self, object_id, workspace_id="default") -> list[dict]:
         return []
 
-    async def find_related(
-        self, event_id, *, workspace_id="default", limit=10
-    ) -> list[SearchResult]:
+    async def find_related(self, event_id, *, workspace_id="default", limit=10) -> list[SearchResult]:
         return []
 
     async def stale_events(self, days=30, workspace_id="default") -> list[KnowledgeEvent]:
@@ -143,22 +140,18 @@ class FakeStorage(StoragePort):
     async def merge_entities(self, keep_id, remove_id):
         pass
 
-    async def semantic_search_entities(
-        self, embedding, *, workspace_id="default", entity_types=None, limit=20
-    ) -> list[dict]:
+    async def semantic_search_entities(self, embedding, *, workspace_id="default",
+                                       entity_types=None, limit=20) -> list[dict]:
         return []
 
-    async def get_events_for_entity(
-        self, entity_id, workspace_id="default", limit=50
-    ) -> list[KnowledgeEvent]:
+    async def get_events_for_entity(self, entity_id, workspace_id="default", limit=50) -> list[KnowledgeEvent]:
         return []
 
     async def recent_events_by_thesis(self, days=1, workspace_id="default") -> list[dict]:
         return []
 
-    async def high_confidence_recent(
-        self, days=7, min_confidence=0.8, workspace_id="default", limit=10
-    ) -> list[KnowledgeEvent]:
+    async def high_confidence_recent(self, days=7, min_confidence=0.8,
+                                     workspace_id="default", limit=10) -> list[KnowledgeEvent]:
         return []
 
     async def entity_momentum(self, days=7, workspace_id="default", limit=10) -> list[dict]:
@@ -173,20 +166,64 @@ class FakeStorage(StoragePort):
 
     async def get_annotations(self, workspace_id, target_type, target_id) -> list:
         return [
-            a
-            for a in self._annotations
+            a for a in self._annotations
             if a.target_type == target_type and a.target_id == target_id
         ]
 
-    async def get_events_without_classification(
-        self, workspace_id="default", limit=50
-    ) -> list[KnowledgeEvent]:
+    async def get_events_without_classification(self, workspace_id="default", limit=50) -> list[KnowledgeEvent]:
         return []
 
-    async def update_event_classification(
-        self, event_id, source_type, source_weight, nature_tags, temporality, key_points, stance
-    ):
+    async def update_event_classification(self, event_id, source_type, source_weight,
+                                          nature_tags, temporality, key_points, stance):
         pass
+
+    # --- Phase 3.6: Signal operations ---
+
+    async def upsert_signal(self, signal: ContradictionResult) -> str:
+        for i, s in enumerate(self._signals):
+            if s.id == signal.id:
+                self._signals[i] = signal
+                return signal.id
+        self._signals.append(signal)
+        return signal.id
+
+    async def get_signals(self, workspace_id, *, event_id=None, limit=50):
+        results = [s for s in self._signals if s.workspace_id == workspace_id]
+        if event_id:
+            results = [s for s in results if s.new_event_id == event_id]
+        return results[:limit]
+
+    async def create_signal_feedback(self, feedback: SignalFeedback) -> str:
+        self._signal_feedback.append(feedback)
+        return feedback.id
+
+    async def get_feedback_summary(self, workspace_id):
+        from collections import defaultdict
+        groups = defaultdict(lambda: {"useful": 0, "not_useful": 0, "wrong": 0, "save_for_later": 0})
+        for fb in self._signal_feedback:
+            if fb.workspace_id != workspace_id:
+                continue
+            # Find signal to get type and topic
+            sig = next((s for s in self._signals if s.id == fb.signal_id), None)
+            if not sig:
+                continue
+            key = (sig.signal_type, (sig.topic or "").lower().strip())
+            groups[key][fb.verdict] += 1
+        return dict(groups)
+
+    async def get_thesis_feedback_stats(self, workspace_id):
+        from collections import defaultdict
+        thesis_stats = defaultdict(lambda: {"useful": 0, "not_useful": 0, "wrong": 0})
+        for fb in self._signal_feedback:
+            if fb.workspace_id != workspace_id:
+                continue
+            sig = next((s for s in self._signals if s.id == fb.signal_id), None)
+            if not sig or not sig.thesis_links:
+                continue
+            thesis = sig.thesis_links[0]
+            if fb.verdict in thesis_stats[thesis]:
+                thesis_stats[thesis][fb.verdict] += 1
+        return [{"thesis_link": k, **v} for k, v in thesis_stats.items()]
 
 
 class FakeEmbedding(EmbeddingPort):
@@ -238,7 +275,6 @@ class FakeLLM(LLMPort):
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------
-
 
 def _build_test_app(storage: FakeStorage, embedding: FakeEmbedding, llm: FakeLLM) -> FastAPI:
     """Create a bare FastAPI app wired with fake adapters (no lifespan)."""

@@ -133,6 +133,8 @@ def main():
         asyncio.run(_cmd_notifications())
     elif command == "signals":
         asyncio.run(_cmd_signals())
+    elif command == "feedback":
+        asyncio.run(_cmd_feedback())
     elif command in ("--help", "-h", "help"):
         _print_help()
     else:
@@ -161,6 +163,7 @@ Commands:
   annotate <id>     Add user annotation to an event
   notifications     Show proactive push notifications
   signals           Analyze signals for recent events (--event-id ID | --recent N)
+  feedback <id> <v> Submit feedback on a signal (useful|not_useful|wrong|save_for_later)
 
 Options:
   --force           Re-import all files (skip_existing=False)
@@ -531,13 +534,19 @@ async def _cmd_import_link():
 
 
 async def _analyze_contradictions(ingest, event, storage):
-    """Run contradiction detection and print results."""
+    """Run contradiction detection, persist signals, and print results."""
     signals = await ingest.post_ingest_analyze(event)
     if signals:
+        # Persist signals
+        for s in signals:
+            s.workspace_id = ingest._workspace_id
+            s.thesis_links = event.thesis_links
+            await storage.upsert_signal(s)
         print(f"  Signals detected: {len(signals)}")
         for s in signals:
             score = f"{s.priority_score:.2f}" if s.priority_score else "?"
             print(f"    - [{s.signal_type} | {score}] {s.topic}: {s.summary}")
+            print(f"      ID: {s.id[:12]}...")
             if s.rationale:
                 print(f"      Why: {s.rationale}")
             if s.evidence_strength:
@@ -674,14 +683,37 @@ async def _cmd_signals():
         if arg == "--recent" and i + 1 < len(sys.argv):
             recent_n = int(sys.argv[i + 1])
 
-    storage, embedding, llm, _, ingest = await _init_services(cfg)
+    storage, embedding, _, _, _ = await _init_services(cfg)
 
     try:
         from cortex.use_cases.contradiction import ContradictionDetector
+        from cortex.use_cases.feedback_adjuster import (
+            apply_feedback_multipliers,
+            build_feedback_multipliers,
+        )
         from cortex.use_cases.push_detector import PushDetector
+
+        llm_cfg = cfg.get("llm", {}).get("openrouter", {})
+        import os
+        api_key = llm_cfg.get("api_key", "") or ""
+        if api_key.startswith("${") and api_key.endswith("}"):
+            api_key = os.environ.get(api_key[2:-1], "")
+        llm = None
+        if api_key:
+            from cortex.adapters.llm.adapter import OpenRouterLLM
+            llm = OpenRouterLLM(
+                api_key=api_key,
+                model=llm_cfg.get("model", "anthropic/claude-haiku-4.5"),
+                base_url=llm_cfg.get("base_url", "https://openrouter.ai/api/v1"),
+                chat_endpoint=llm_cfg.get("chat_endpoint", "/chat/completions"),
+            )
 
         detector = ContradictionDetector(storage, embedding, llm)
         push = PushDetector(storage, workspace)
+
+        # Fetch feedback multipliers
+        feedback_summary = await storage.get_feedback_summary(workspace)
+        multipliers = build_feedback_multipliers(feedback_summary)
 
         if event_id:
             event = await storage.get_event(event_id, workspace)
@@ -690,11 +722,8 @@ async def _cmd_signals():
                 return
             events = [event]
         else:
-            # Get recent events
-            stats = await storage.stats(workspace)
             events_raw = await storage.daily_events(None, workspace)
             if not events_raw:
-                from cortex.domain.entities import KnowledgeEvent
                 events_raw = []
             events = events_raw[:recent_n]
 
@@ -704,6 +733,16 @@ async def _cmd_signals():
 
         for event in events:
             signals = await detector.analyze(event, workspace)
+            # Apply feedback-based priority adjustment
+            if signals and multipliers:
+                apply_feedback_multipliers(signals, multipliers)
+                signals.sort(key=lambda s: s.priority_score, reverse=True)
+            # Persist signals
+            for s in signals:
+                s.workspace_id = workspace
+                s.thesis_links = event.thesis_links
+                await storage.upsert_signal(s)
+
             print(f"\n=== Signals for: \"{event.title}\" ===")
             if not signals:
                 print("  (no signals detected)")
@@ -711,12 +750,11 @@ async def _cmd_signals():
             for s in signals:
                 score = f"{s.priority_score:.2f}"
                 print(f"  [{s.signal_type} | {score}] {s.topic}")
+                print(f"    ID: {s.id[:12]}...")
                 if s.rationale:
                     print(f"    Why: {s.rationale}")
                 strength = s.evidence_strength or "unknown"
-                ids = ", ".join(
-                    s.evidence_event_ids[:3]
-                )
+                ids = ", ".join(s.evidence_event_ids[:3])
                 print(f"    Strength: {strength} | Events: [{ids}]")
 
             # Show which would become notifications
@@ -726,6 +764,45 @@ async def _cmd_signals():
                     f"  -> {len(notifs)} notification(s) "
                     f"would be generated"
                 )
+    finally:
+        await storage.close()
+
+
+async def _cmd_feedback():
+    """Submit feedback for a persisted signal."""
+    if len(sys.argv) < 4:
+        print("Usage: cortex feedback <signal-id> <useful|not_useful|wrong|save_for_later> [--note TEXT]")
+        sys.exit(1)
+
+    signal_id = sys.argv[2]
+    verdict = sys.argv[3]
+
+    valid_verdicts = ("useful", "not_useful", "wrong", "save_for_later")
+    if verdict not in valid_verdicts:
+        print(f"Invalid verdict '{verdict}'. Choose from: {', '.join(valid_verdicts)}")
+        sys.exit(1)
+
+    note = None
+    for i, arg in enumerate(sys.argv):
+        if arg == "--note" and i + 1 < len(sys.argv):
+            note = sys.argv[i + 1]
+
+    cfg = load_config()
+    storage, _ = await _init_storage_only(cfg)
+    workspace = cfg.get("workspace", "default")
+
+    try:
+        from cortex.domain.entities import SignalFeedback
+        feedback = SignalFeedback(
+            signal_id=signal_id,
+            verdict=verdict,
+            workspace_id=workspace,
+            note=note,
+        )
+        fid = await storage.create_signal_feedback(feedback)
+        print(f"Feedback recorded (id={fid[:8]}..., verdict={verdict})")
+        if note:
+            print(f"  Note: {note}")
     finally:
         await storage.close()
 
