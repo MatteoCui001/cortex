@@ -1,9 +1,11 @@
 """Tests for domain constants."""
-
 from cortex.domain.constants import (
     EVENT_TYPES,
+    KEY_POINT_TYPES,
     NATURE_TAGS,
     RAW_INPUT_TYPES,
+    SIGNAL_TYPE_BASE_PRIORITY,
+    SIGNAL_TYPES,
     SOURCE_TYPES,
     SOURCE_WEIGHTS,
     TEMPORALITIES,
@@ -79,3 +81,29 @@ def test_event_types_non_empty():
 def test_event_types_expected_members():
     for et in ("article", "meeting", "note", "thesis", "chat"):
         assert et in EVENT_TYPES
+
+
+def test_key_point_types_expected_members():
+    for kpt in ("data", "claim", "prediction", "question"):
+        assert kpt in KEY_POINT_TYPES
+
+
+def test_signal_types_expected_members():
+    for st in ("new_signal", "redundant", "contradiction", "answer", "bridge"):
+        assert st in SIGNAL_TYPES
+
+
+def test_signal_type_base_priority_keys_match_signal_types():
+    assert set(SIGNAL_TYPE_BASE_PRIORITY.keys()) == SIGNAL_TYPES
+
+
+def test_signal_type_base_priority_values_in_range():
+    for key, val in SIGNAL_TYPE_BASE_PRIORITY.items():
+        assert 0.0 <= val <= 1.0, f"{key} priority {val} out of range"
+
+
+def test_signal_type_priority_ordering():
+    assert SIGNAL_TYPE_BASE_PRIORITY["contradiction"] > SIGNAL_TYPE_BASE_PRIORITY["answer"]
+    assert SIGNAL_TYPE_BASE_PRIORITY["answer"] > SIGNAL_TYPE_BASE_PRIORITY["bridge"]
+    assert SIGNAL_TYPE_BASE_PRIORITY["bridge"] > SIGNAL_TYPE_BASE_PRIORITY["new_signal"]
+    assert SIGNAL_TYPE_BASE_PRIORITY["new_signal"] > SIGNAL_TYPE_BASE_PRIORITY["redundant"]

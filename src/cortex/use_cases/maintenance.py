@@ -1,17 +1,20 @@
 """
-Maintenance use case: entity embeddings, tag normalization, entity deduplication.
+Maintenance use case: entity embeddings, tag normalization, entity deduplication,
+classification audit.
 """
-
 from __future__ import annotations
 
 import re
 from collections import defaultdict
 from typing import Optional
 
+from cortex.adapters.llm.classifier import is_weak_key_points
+from cortex.domain.constants import NATURE_TAGS, SOURCE_TYPES, TEMPORALITIES
 from cortex.domain.ports import EmbeddingPort, StoragePort
 
 
 class MaintenanceUseCase:
+
     def __init__(
         self,
         storage: StoragePort,
@@ -31,7 +34,9 @@ class MaintenanceUseCase:
     ) -> dict:
         """Generate embeddings for all entities that lack them."""
         stats = {"processed": 0, "total": 0}
-        stats["total"] = await self._storage.count_entities_without_embedding(self._workspace_id)
+        stats["total"] = await self._storage.count_entities_without_embedding(
+            self._workspace_id
+        )
 
         while True:
             entities = await self._storage.get_entities_without_embedding(
@@ -44,7 +49,9 @@ class MaintenanceUseCase:
             embeddings = await self._embedding.embed_batch(texts)
 
             for ent, emb in zip(entities, embeddings):
-                await self._storage.update_entity_embedding(ent["id"], emb)
+                await self._storage.update_entity_embedding(
+                    ent["id"], emb
+                )
 
             stats["processed"] += len(entities)
             if on_progress:
@@ -138,3 +145,51 @@ class MaintenanceUseCase:
 
         stats["entities_after"] = stats["entities_before"] - stats["merged"]
         return stats
+
+    async def audit_classification(self, limit: int = 200) -> dict:
+        """Audit classification quality across events. Returns issue counts."""
+        events = await self._storage.get_events_without_classification(
+            self._workspace_id, limit=limit,
+        )
+        issues: dict[str, list[str]] = {
+            "missing_source_type": [],
+            "invalid_source_type": [],
+            "weak_key_points": [],
+            "missing_temporality": [],
+            "invalid_temporality": [],
+            "missing_nature_tags": [],
+            "invalid_nature_tags": [],
+        }
+
+        for evt in events:
+            eid = evt.id
+            if not evt.source_type:
+                issues["missing_source_type"].append(eid)
+            elif evt.source_type not in SOURCE_TYPES:
+                issues["invalid_source_type"].append(eid)
+
+            if not evt.key_points:
+                issues["weak_key_points"].append(eid)
+            elif is_weak_key_points(evt.key_points):
+                issues["weak_key_points"].append(eid)
+
+            if not evt.temporality:
+                issues["missing_temporality"].append(eid)
+            elif evt.temporality not in TEMPORALITIES:
+                issues["invalid_temporality"].append(eid)
+
+            if not evt.nature_tags:
+                issues["missing_nature_tags"].append(eid)
+            else:
+                for tag in evt.nature_tags:
+                    if tag not in NATURE_TAGS:
+                        issues["invalid_nature_tags"].append(eid)
+                        break
+
+        return {
+            "events_checked": len(events),
+            "issues": {k: len(v) for k, v in issues.items()},
+            "event_ids_to_reclassify": list({
+                eid for ids in issues.values() for eid in ids
+            }),
+        }

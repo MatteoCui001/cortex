@@ -1,22 +1,23 @@
 """Tests for domain entities and enums."""
-
 import uuid
 from datetime import datetime
 
 from cortex.domain.entities import (
     Annotation,
+    ContradictionResult,
     Entity,
     EntityType,
     EventType,
     KnowledgeEvent,
+    PushNotification,
     Relation,
     RelationType,
 )
 
+
 # ---------------------------------------------------------------------------
 # EventType enum
 # ---------------------------------------------------------------------------
-
 
 def test_event_type_values():
     assert EventType.ARTICLE == "article"
@@ -39,7 +40,6 @@ def test_event_type_is_str():
 # ---------------------------------------------------------------------------
 # KnowledgeEvent defaults
 # ---------------------------------------------------------------------------
-
 
 def test_knowledge_event_default_id_is_uuid():
     event = KnowledgeEvent()
@@ -113,7 +113,6 @@ def test_knowledge_event_custom_fields():
 # Entity
 # ---------------------------------------------------------------------------
 
-
 def test_entity_default_id_is_uuid():
     entity = Entity()
     uuid.UUID(entity.id)
@@ -138,7 +137,6 @@ def test_entity_aliases_default_empty():
 # ---------------------------------------------------------------------------
 # Relation
 # ---------------------------------------------------------------------------
-
 
 def test_relation_default_id_is_uuid():
     rel = Relation()
@@ -174,7 +172,6 @@ def test_relation_custom_fields():
 # Annotation
 # ---------------------------------------------------------------------------
 
-
 def test_annotation_default_id_is_uuid():
     ann = Annotation()
     uuid.UUID(ann.id)
@@ -193,3 +190,62 @@ def test_annotation_custom_stance():
     assert ann.stance == "agree"
     assert ann.target_type == "event"
     assert ann.target_id == "123"
+
+
+# ---------------------------------------------------------------------------
+# ContradictionResult
+# ---------------------------------------------------------------------------
+
+def test_contradiction_result_default_priority_score():
+    cr = ContradictionResult(
+        new_event_id="a", existing_event_id="b", signal_type="new_signal"
+    )
+    assert cr.priority_score == 0.0
+
+
+def test_contradiction_result_evidence_event_ids_default_empty():
+    cr = ContradictionResult(
+        new_event_id="a", existing_event_id="b", signal_type="contradiction"
+    )
+    assert cr.evidence_event_ids == []
+
+
+def test_contradiction_result_rationale_default_none():
+    cr = ContradictionResult(
+        new_event_id="a", existing_event_id="b", signal_type="answer"
+    )
+    assert cr.rationale is None
+
+
+def test_contradiction_result_evidence_strength_default_none():
+    cr = ContradictionResult(
+        new_event_id="a", existing_event_id="b", signal_type="bridge"
+    )
+    assert cr.evidence_strength is None
+
+
+def test_contradiction_result_custom_fields():
+    cr = ContradictionResult(
+        new_event_id="a",
+        existing_event_id="b",
+        signal_type="contradiction",
+        priority_score=0.87,
+        evidence_event_ids=["b", "c"],
+        rationale="Directly conflicts with prior claim",
+        evidence_strength="strong",
+    )
+    assert cr.priority_score == 0.87
+    assert cr.evidence_event_ids == ["b", "c"]
+    assert cr.rationale == "Directly conflicts with prior claim"
+    assert cr.evidence_strength == "strong"
+
+
+# ---------------------------------------------------------------------------
+# PushNotification
+# ---------------------------------------------------------------------------
+
+def test_push_notification_created_at_is_timezone_aware():
+    notif = PushNotification(
+        trigger_type="thesis_stale", title="Test", body="Test body"
+    )
+    assert notif.created_at.tzinfo is not None
