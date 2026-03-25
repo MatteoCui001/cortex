@@ -5,6 +5,7 @@ LLM adapter for metadata extraction via OpenRouter-compatible API.
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Optional
 
@@ -29,6 +30,12 @@ Return ONLY valid JSON with these fields:
 
 Content:
 {content}"""
+
+
+def _ssl_verify() -> bool:
+    """Check CORTEX_SSL_VERIFY env var (default True)."""
+    val = os.environ.get("CORTEX_SSL_VERIFY", "1").lower()
+    return val not in ("0", "false", "no")
 
 
 class OpenRouterLLM(LLMPort):
@@ -88,7 +95,8 @@ class OpenRouterLLM(LLMPort):
         return await self._chat(prompt)
 
     async def _chat(self, prompt: str) -> str:
-        async with httpx.AsyncClient(timeout=30) as client:
+        verify = _ssl_verify()
+        async with httpx.AsyncClient(timeout=60, verify=verify) as client:
             resp = await client.post(
                 f"{self._base_url}{self._chat_endpoint}",
                 headers={
