@@ -26,25 +26,49 @@ Working features:
 ### Prerequisites
 
 - macOS with Homebrew
-- Python 3.11+
-- PostgreSQL 17 with pgvector + zhparser
+- Python 3.11+ and [uv](https://docs.astral.sh/uv/)
+- PostgreSQL 16 with pgvector + zhparser
 
 ### Install
 
 ```bash
 git clone <repo-url> && cd cortex
-uv sync
+
+# Install all dev dependencies (recommended)
+make dev
+# Or manually:
+uv sync --extra dev --extra local-embeddings
 
 # Create database and run migrations
 createdb cortex
 for f in migrations/*.sql; do psql -d cortex -f "$f"; done
 ```
 
+> **Note:** `migrations/007_relations_unique.sql` adds a unique index on relations.
+> If upgrading an existing database, first deduplicate:
+> ```sql
+> DELETE FROM relations a USING relations b
+> WHERE a.id > b.id AND a.workspace_id = b.workspace_id
+>   AND a.source_id = b.source_id AND a.target_id = b.target_id
+>   AND a.relation = b.relation;
+> ```
+> Then apply `psql -d cortex -f migrations/007_relations_unique.sql`.
+
 ### Configure
 
 ```bash
 cp config.yaml config.local.yaml
 # Edit config.local.yaml: set LLM API key, adjust thesis list
+```
+
+### Development
+
+```bash
+make check    # lint + tests (the daily driver)
+make test     # tests only
+make lint     # ruff check only
+make format   # ruff auto-fix
+make serve    # start API server on :8420
 ```
 
 ### Use
@@ -56,11 +80,20 @@ cortex import --vault ~/path/to/vault
 # Search
 cortex search "AI Agent infrastructure"
 
+# Import a web article
+cortex import-link https://example.com/article
+
+# Annotate an event
+cortex annotate <event-id> "agree -- strong evidence"
+
 # Thesis coverage
 cortex thesis
 
 # Daily digest
 cortex digest --days 7
+
+# Push notifications check
+cortex notifications
 
 # Stats
 cortex stats
@@ -80,6 +113,7 @@ src/cortex/
     postgres/      PostgreSQL + pgvector storage
     embeddings/    Local embedding (bge-small-zh-v1.5)
     llm/           LLM adapter for metadata extraction
+    filestore/     Human-readable file storage for originals
   api/             FastAPI REST endpoints
   cli/             Command-line interface
 ```
