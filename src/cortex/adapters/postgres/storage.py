@@ -1,6 +1,7 @@
 """
 PostgreSQL + pgvector adapter implementing StoragePort.
 """
+
 from __future__ import annotations
 
 import json
@@ -10,14 +11,19 @@ from typing import Optional
 import asyncpg
 
 from cortex.domain.entities import (
-    Entity, EntityType, EventType, KnowledgeEvent, Relation, RelationType,
-    SearchResult, ThesisCoverage,
+    Entity,
+    EntityType,
+    EventType,
+    KnowledgeEvent,
+    Relation,
+    RelationType,
+    SearchResult,
+    ThesisCoverage,
 )
 from cortex.domain.ports import StoragePort
 
 
 class PostgresStorage(StoragePort):
-
     def __init__(self, dsn: str):
         self._dsn = dsn
         self._pool: Optional[asyncpg.Pool] = None
@@ -71,11 +77,17 @@ class PostgresStorage(StoragePort):
             updated_at = now(),
             raw_input_type = COALESCE(EXCLUDED.raw_input_type, events.raw_input_type),
             raw_input_ref = COALESCE(EXCLUDED.raw_input_ref, events.raw_input_ref),
-            key_points = CASE WHEN EXCLUDED.key_points IS NOT NULL AND EXCLUDED.key_points != '[]'::jsonb THEN EXCLUDED.key_points ELSE events.key_points END,
-            stance = CASE WHEN EXCLUDED.stance IS NOT NULL AND EXCLUDED.stance != '{}'::jsonb THEN EXCLUDED.stance ELSE events.stance END,
+            key_points = CASE
+                WHEN EXCLUDED.key_points IS NOT NULL AND EXCLUDED.key_points != '[]'::jsonb
+                THEN EXCLUDED.key_points ELSE events.key_points END,
+            stance = CASE
+                WHEN EXCLUDED.stance IS NOT NULL AND EXCLUDED.stance != '{}'::jsonb
+                THEN EXCLUDED.stance ELSE events.stance END,
             source_type = COALESCE(EXCLUDED.source_type, events.source_type),
             source_weight = COALESCE(EXCLUDED.source_weight, events.source_weight),
-            nature_tags = CASE WHEN EXCLUDED.nature_tags IS NOT NULL AND EXCLUDED.nature_tags != '[]'::jsonb THEN EXCLUDED.nature_tags ELSE events.nature_tags END,
+            nature_tags = CASE
+                WHEN EXCLUDED.nature_tags IS NOT NULL AND EXCLUDED.nature_tags != '[]'::jsonb
+                THEN EXCLUDED.nature_tags ELSE events.nature_tags END,
             temporality = COALESCE(EXCLUDED.temporality, events.temporality),
             expires_at = COALESCE(EXCLUDED.expires_at, events.expires_at),
             user_annotation = COALESCE(EXCLUDED.user_annotation, events.user_annotation),
@@ -101,17 +113,17 @@ class PostgresStorage(StoragePort):
             json.dumps(event.metadata),
             event.created_at,
             event.updated_at,
-            getattr(event, 'raw_input_type', None),
-            getattr(event, 'raw_input_ref', None),
-            json.dumps(getattr(event, 'key_points', None) or []),
-            json.dumps(getattr(event, 'stance', None) or {}),
-            getattr(event, 'source_type', None),
-            getattr(event, 'source_weight', None),
-            json.dumps(getattr(event, 'nature_tags', None) or []),
-            getattr(event, 'temporality', None),
-            getattr(event, 'expires_at', None),
-            getattr(event, 'user_annotation', None),
-            getattr(event, 'user_stance', None),
+            getattr(event, "raw_input_type", None),
+            getattr(event, "raw_input_ref", None),
+            json.dumps(getattr(event, "key_points", None) or []),
+            json.dumps(getattr(event, "stance", None) or {}),
+            getattr(event, "source_type", None),
+            getattr(event, "source_weight", None),
+            json.dumps(getattr(event, "nature_tags", None) or []),
+            getattr(event, "temporality", None),
+            getattr(event, "expires_at", None),
+            getattr(event, "user_annotation", None),
+            getattr(event, "user_stance", None),
         )
         return str(row["id"])
 
@@ -156,7 +168,9 @@ class PostgresStorage(StoragePort):
             relation.source_id,
             relation.target_type,
             relation.target_id,
-            relation.relation.value if isinstance(relation.relation, RelationType) else relation.relation,
+            relation.relation.value
+            if isinstance(relation.relation, RelationType)
+            else relation.relation,
             relation.confidence,
             json.dumps(relation.metadata),
         )
@@ -167,10 +181,13 @@ class PostgresStorage(StoragePort):
     # Read operations
     # ------------------------------------------------------------------
 
-    async def get_event(self, event_id: str, workspace_id: str = "default") -> Optional[KnowledgeEvent]:
+    async def get_event(
+        self, event_id: str, workspace_id: str = "default"
+    ) -> Optional[KnowledgeEvent]:
         row = await self._pool.fetchrow(
             "SELECT * FROM events WHERE id = $1 AND workspace_id = $2",
-            event_id, workspace_id,
+            event_id,
+            workspace_id,
         )
         return _row_to_event(row) if row else None
 
@@ -306,8 +323,7 @@ class PostgresStorage(StoragePort):
         """
         rows = await self._pool.fetch(sql, event_id, workspace_id, limit)
         return [
-            SearchResult(event=_row_to_event(row), score=1.0, match_type="related")
-            for row in rows
+            SearchResult(event=_row_to_event(row), score=1.0, match_type="related") for row in rows
         ]
 
     async def stale_events(
@@ -357,14 +373,16 @@ class PostgresStorage(StoragePort):
         for row in rows:
             latest = row["latest"]
             days_since = (now - latest).days if latest else 0
-            results.append(ThesisCoverage(
-                thesis_name=row["thesis"],
-                event_count=row["cnt"],
-                avg_confidence=float(row["avg_conf"]),
-                type_distribution=json.loads(row["type_dist"]) if row["type_dist"] else {},
-                latest_update=latest,
-                days_since_update=days_since,
-            ))
+            results.append(
+                ThesisCoverage(
+                    thesis_name=row["thesis"],
+                    event_count=row["cnt"],
+                    avg_confidence=float(row["avg_conf"]),
+                    type_distribution=json.loads(row["type_dist"]) if row["type_dist"] else {},
+                    latest_update=latest,
+                    days_since_update=days_since,
+                )
+            )
         return results
 
     async def daily_events(
@@ -402,10 +420,10 @@ class PostgresStorage(StoragePort):
     async def event_exists(self, source_path: str, workspace_id: str = "default") -> bool:
         row = await self._pool.fetchrow(
             "SELECT 1 FROM events WHERE workspace_id = $1 AND source_path = $2",
-            workspace_id, source_path,
+            workspace_id,
+            source_path,
         )
         return row is not None
-
 
     # ------------------------------------------------------------------
     # Maintenance operations
@@ -419,18 +437,23 @@ class PostgresStorage(StoragePort):
         return row["cnt"]
 
     async def get_entities_without_embedding(
-        self, workspace_id: str = "default", limit: int = 50,
+        self,
+        workspace_id: str = "default",
+        limit: int = 50,
     ) -> list[dict]:
         rows = await self._pool.fetch(
-            "SELECT id, name FROM entities WHERE workspace_id = $1 AND embedding IS NULL ORDER BY id LIMIT $2",
-            workspace_id, limit,
+            "SELECT id, name FROM entities"
+            " WHERE workspace_id = $1 AND embedding IS NULL ORDER BY id LIMIT $2",
+            workspace_id,
+            limit,
         )
         return [dict(r) for r in rows]
 
     async def update_entity_embedding(self, entity_id: str, embedding: list[float]):
         await self._pool.execute(
             "UPDATE entities SET embedding = $1, updated_at = now() WHERE id = $2",
-            _to_pgvector(embedding), entity_id,
+            _to_pgvector(embedding),
+            entity_id,
         )
 
     async def get_all_events_with_tags(self, workspace_id: str = "default") -> list[dict]:
@@ -438,16 +461,24 @@ class PostgresStorage(StoragePort):
             "SELECT id, tags FROM events WHERE workspace_id = $1 AND tags != '[]'::jsonb",
             workspace_id,
         )
-        return [{"id": str(r["id"]), "tags": json.loads(r["tags"]) if isinstance(r["tags"], str) else r["tags"]} for r in rows]
+        return [
+            {
+                "id": str(r["id"]),
+                "tags": json.loads(r["tags"]) if isinstance(r["tags"], str) else r["tags"],
+            }
+            for r in rows
+        ]
 
     async def update_event_tags(self, event_id: str, tags: list[str]):
         await self._pool.execute(
             "UPDATE events SET tags = $1, updated_at = now() WHERE id = $2",
-            json.dumps(tags), event_id,
+            json.dumps(tags),
+            event_id,
         )
 
     async def get_all_entities(self, workspace_id: str = "default") -> list[dict]:
-        rows = await self._pool.fetch("""
+        rows = await self._pool.fetch(
+            """
             SELECT e.id, e.type, e.name,
                    COUNT(r.id) AS mention_count
             FROM entities e
@@ -455,19 +486,31 @@ class PostgresStorage(StoragePort):
             WHERE e.workspace_id = $1
             GROUP BY e.id, e.type, e.name
             ORDER BY e.name
-        """, workspace_id)
-        return [{"id": str(r["id"]), "type": r["type"], "name": r["name"], "mention_count": r["mention_count"]} for r in rows]
+        """,
+            workspace_id,
+        )
+        return [
+            {
+                "id": str(r["id"]),
+                "type": r["type"],
+                "name": r["name"],
+                "mention_count": r["mention_count"],
+            }
+            for r in rows
+        ]
 
     async def merge_entities(self, keep_id: str, remove_id: str):
         """Merge remove_id into keep_id: reparent relations, delete duplicate."""
         # Reparent relations pointing to the removed entity
         await self._pool.execute(
             "UPDATE relations SET target_id = $1 WHERE target_id = $2 AND target_type = 'entity'",
-            keep_id, remove_id,
+            keep_id,
+            remove_id,
         )
         await self._pool.execute(
             "UPDATE relations SET source_id = $1 WHERE source_id = $2 AND source_type = 'entity'",
-            keep_id, remove_id,
+            keep_id,
+            remove_id,
         )
         # Delete the duplicate entity
         await self._pool.execute("DELETE FROM entities WHERE id = $1", remove_id)
@@ -487,7 +530,7 @@ class PostgresStorage(StoragePort):
         type_clause = ""
         params: list = [_to_pgvector(embedding), workspace_id, limit]
         if entity_types:
-            placeholders = ", ".join(f"${i+4}" for i in range(len(entity_types)))
+            placeholders = ", ".join(f"${i + 4}" for i in range(len(entity_types)))
             type_clause = f"AND e.type IN ({placeholders})"
             params.extend(entity_types)
 
@@ -510,7 +553,9 @@ class PostgresStorage(StoragePort):
                 "id": str(r["id"]),
                 "type": r["type"],
                 "name": r["name"],
-                "aliases": json.loads(r["aliases"]) if isinstance(r["aliases"], str) else r["aliases"],
+                "aliases": json.loads(r["aliases"])
+                if isinstance(r["aliases"], str)
+                else r["aliases"],
                 "score": float(r["score"]),
                 "mention_count": r["mention_count"],
             }
@@ -539,7 +584,9 @@ class PostgresStorage(StoragePort):
     # ------------------------------------------------------------------
 
     async def recent_events_by_thesis(
-        self, days: int = 1, workspace_id: str = "default",
+        self,
+        days: int = 1,
+        workspace_id: str = "default",
     ) -> list[dict]:
         sql = """
         SELECT
@@ -556,7 +603,11 @@ class PostgresStorage(StoragePort):
         return [dict(r) for r in rows]
 
     async def high_confidence_recent(
-        self, days: int = 7, min_confidence: float = 0.8, workspace_id: str = "default", limit: int = 10,
+        self,
+        days: int = 7,
+        min_confidence: float = 0.8,
+        workspace_id: str = "default",
+        limit: int = 10,
     ) -> list[KnowledgeEvent]:
         sql = """
         SELECT * FROM events
@@ -570,7 +621,10 @@ class PostgresStorage(StoragePort):
         return [_row_to_event(r) for r in rows]
 
     async def entity_momentum(
-        self, days: int = 7, workspace_id: str = "default", limit: int = 10,
+        self,
+        days: int = 7,
+        workspace_id: str = "default",
+        limit: int = 10,
     ) -> list[dict]:
         sql = """
         SELECT ent.name, ent.type, COUNT(*) AS mentions
@@ -589,11 +643,11 @@ class PostgresStorage(StoragePort):
     async def get_existing_source_paths(self, workspace_id: str = "default") -> dict[str, str]:
         """Return {source_path: updated_at_iso} for all events."""
         rows = await self._pool.fetch(
-            "SELECT source_path, updated_at FROM events WHERE workspace_id = $1 AND source_path != ''",
+            "SELECT source_path, updated_at FROM events"
+            " WHERE workspace_id = $1 AND source_path != ''",
             workspace_id,
         )
         return {r["source_path"]: r["updated_at"].isoformat() for r in rows}
-
 
     # ------------------------------------------------------------------
     # Phase 3: Annotation operations
@@ -601,7 +655,9 @@ class PostgresStorage(StoragePort):
 
     async def create_annotation(self, annotation) -> str:
         sql = """
-        INSERT INTO annotations (id, workspace_id, target_type, target_id, annotation, stance, context)
+        INSERT INTO annotations (
+            id, workspace_id, target_type, target_id, annotation, stance, context
+        )
         VALUES ($1, $2, $3, $4, $5, $6, $7)
         RETURNING id
         """
@@ -619,9 +675,14 @@ class PostgresStorage(StoragePort):
 
     async def get_annotations(self, workspace_id: str, target_type: str, target_id: str) -> list:
         from cortex.domain.entities import Annotation
+
         rows = await self._pool.fetch(
-            "SELECT * FROM annotations WHERE workspace_id = $1 AND target_type = $2 AND target_id = $3::uuid ORDER BY created_at",
-            workspace_id, target_type, target_id,
+            "SELECT * FROM annotations"
+            " WHERE workspace_id = $1 AND target_type = $2"
+            " AND target_id = $3::uuid ORDER BY created_at",
+            workspace_id,
+            target_type,
+            target_id,
         )
         return [
             Annotation(
@@ -631,35 +692,54 @@ class PostgresStorage(StoragePort):
                 target_id=str(r["target_id"]),
                 annotation=r["annotation"],
                 stance=r["stance"],
-                context=json.loads(r["context"]) if isinstance(r["context"], str) else (r["context"] or {}),
+                context=json.loads(r["context"])
+                if isinstance(r["context"], str)
+                else (r["context"] or {}),
                 created_at=r["created_at"],
             )
             for r in rows
         ]
 
-    async def get_events_without_classification(self, workspace_id: str = "default", limit: int = 50) -> list:
+    async def get_events_without_classification(
+        self, workspace_id: str = "default", limit: int = 50
+    ) -> list:
         rows = await self._pool.fetch(
-            "SELECT * FROM events WHERE workspace_id = $1 AND source_type IS NULL ORDER BY created_at DESC LIMIT $2",
-            workspace_id, limit,
+            "SELECT * FROM events WHERE workspace_id = $1"
+            " AND source_type IS NULL ORDER BY created_at DESC LIMIT $2",
+            workspace_id,
+            limit,
         )
         return [_row_to_event(row) for row in rows]
 
     async def update_event_classification(
-        self, event_id: str, source_type: str, source_weight: float,
-        nature_tags: list, temporality: str, key_points: list, stance: dict,
+        self,
+        event_id: str,
+        source_type: str,
+        source_weight: float,
+        nature_tags: list,
+        temporality: str,
+        key_points: list,
+        stance: dict,
     ):
         await self._pool.execute(
             """UPDATE events SET
                 source_type = $1, source_weight = $2, nature_tags = $3,
                 temporality = $4, key_points = $5, stance = $6, updated_at = now()
             WHERE id = $7""",
-            source_type, source_weight, json.dumps(nature_tags),
-            temporality, json.dumps(key_points), json.dumps(stance), event_id,
+            source_type,
+            source_weight,
+            json.dumps(nature_tags),
+            temporality,
+            json.dumps(key_points),
+            json.dumps(stance),
+            event_id,
         )
+
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _safe_col(row, name, default=None):
     """Safely get a column that may not exist in the query result."""
@@ -694,13 +774,17 @@ def _row_to_event(row: asyncpg.Record) -> KnowledgeEvent:
         content=row["content"],
         summary=row["summary"],
         tags=json.loads(row["tags"]) if isinstance(row["tags"], str) else row["tags"],
-        thesis_links=json.loads(row["thesis_links"]) if isinstance(row["thesis_links"], str) else row["thesis_links"],
+        thesis_links=json.loads(row["thesis_links"])
+        if isinstance(row["thesis_links"], str)
+        else row["thesis_links"],
         confidence=float(row["confidence"]),
         tier=row["tier"],
         source=row["source"],
         source_path=row["source_path"],
         embedding=[],  # don't load embedding into memory by default
-        metadata=json.loads(row["metadata"]) if isinstance(row["metadata"], str) else row["metadata"],
+        metadata=json.loads(row["metadata"])
+        if isinstance(row["metadata"], str)
+        else row["metadata"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         # Phase 3 fields (safe access for old queries)
@@ -709,7 +793,9 @@ def _row_to_event(row: asyncpg.Record) -> KnowledgeEvent:
         key_points=_safe_json_col(row, "key_points", []),
         stance=_safe_json_col(row, "stance", {}),
         source_type=_safe_col(row, "source_type"),
-        source_weight=float(row["source_weight"]) if _safe_col(row, "source_weight") is not None else None,
+        source_weight=float(row["source_weight"])
+        if _safe_col(row, "source_weight") is not None
+        else None,
         nature_tags=_safe_json_col(row, "nature_tags", []),
         temporality=_safe_col(row, "temporality"),
         expires_at=_safe_col(row, "expires_at"),

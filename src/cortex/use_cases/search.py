@@ -1,6 +1,7 @@
 """
 Search use case: semantic, fulltext, hybrid search + entity search.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -10,7 +11,6 @@ from cortex.domain.ports import EmbeddingPort, StoragePort
 
 
 class SearchUseCase:
-
     def __init__(
         self,
         storage: StoragePort,
@@ -63,12 +63,8 @@ class SearchUseCase:
         semantic_weight: float = 0.7,
     ) -> list[SearchResult]:
         """Combine semantic and fulltext results with weighted scoring."""
-        sem_results = await self.semantic(
-            query, limit=limit * 2, type_filter=type_filter
-        )
-        ft_results = await self.fulltext(
-            query, limit=limit * 2, type_filter=type_filter
-        )
+        sem_results = await self.semantic(query, limit=limit * 2, type_filter=type_filter)
+        ft_results = await self.fulltext(query, limit=limit * 2, type_filter=type_filter)
 
         # Merge and re-rank
         scored: dict[str, tuple[SearchResult, float]] = {}

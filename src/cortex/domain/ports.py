@@ -2,6 +2,7 @@
 Cortex Domain Ports (Interfaces)
 Abstract base classes that define contracts for adapters.
 """
+
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
@@ -9,7 +10,11 @@ from datetime import date
 from typing import Optional
 
 from cortex.domain.entities import (
-    KnowledgeEvent, Entity, Relation, SearchResult, ThesisCoverage,
+    Entity,
+    KnowledgeEvent,
+    Relation,
+    SearchResult,
+    ThesisCoverage,
 )
 
 
@@ -29,7 +34,9 @@ class StoragePort(ABC):
         """Insert a relation. Returns relation id."""
 
     @abstractmethod
-    async def get_event(self, event_id: str, workspace_id: str = "default") -> Optional[KnowledgeEvent]:
+    async def get_event(
+        self, event_id: str, workspace_id: str = "default"
+    ) -> Optional[KnowledgeEvent]:
         """Get a single event by id."""
 
     @abstractmethod
@@ -121,7 +128,9 @@ class StoragePort(ABC):
         """Count entities missing embeddings."""
 
     @abstractmethod
-    async def get_entities_without_embedding(self, workspace_id: str = "default", limit: int = 50) -> list[dict]:
+    async def get_entities_without_embedding(
+        self, workspace_id: str = "default", limit: int = 50
+    ) -> list[dict]:
         """Get entities missing embeddings."""
 
     @abstractmethod
@@ -173,24 +182,30 @@ class StoragePort(ABC):
     # ------------------------------------------------------------------
 
     @abstractmethod
-    async def recent_events_by_thesis(self, days: int = 1, workspace_id: str = "default") -> list[dict]:
+    async def recent_events_by_thesis(
+        self, days: int = 1, workspace_id: str = "default"
+    ) -> list[dict]:
         """Get recent events grouped by thesis and type."""
 
     @abstractmethod
     async def high_confidence_recent(
-        self, days: int = 7, min_confidence: float = 0.8,
-        workspace_id: str = "default", limit: int = 10,
+        self,
+        days: int = 7,
+        min_confidence: float = 0.8,
+        workspace_id: str = "default",
+        limit: int = 10,
     ) -> list[KnowledgeEvent]:
         """Get high-confidence recent events."""
 
     @abstractmethod
-    async def entity_momentum(self, days: int = 7, workspace_id: str = "default", limit: int = 10) -> list[dict]:
+    async def entity_momentum(
+        self, days: int = 7, workspace_id: str = "default", limit: int = 10
+    ) -> list[dict]:
         """Get most-mentioned entities in recent period."""
 
     @abstractmethod
     async def get_existing_source_paths(self, workspace_id: str = "default") -> dict[str, str]:
         """Return {source_path: updated_at_iso} for incremental sync."""
-
 
     # ------------------------------------------------------------------
     # Phase 3: Annotation operations
@@ -288,7 +303,6 @@ class LLMPort(ABC):
         Returns: {summary, tags, entities, thesis_links, confidence}
         """
 
-
     @abstractmethod
     async def classify_three_dimensions(self, content: str) -> dict:
         """Classify content along source, nature, temporality dimensions."""
@@ -296,6 +310,7 @@ class LLMPort(ABC):
     @abstractmethod
     async def parse_stance_llm(self, annotation: str) -> str:
         """Parse user stance from natural language annotation."""
+
     @abstractmethod
     async def chat(self, prompt: str) -> str:
         """Send a raw prompt and return the response string."""

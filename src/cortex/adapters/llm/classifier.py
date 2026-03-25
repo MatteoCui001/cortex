@@ -2,6 +2,7 @@
 Three-dimension information classifier.
 Uses the same LLM adapter pattern as adapter.py.
 """
+
 from __future__ import annotations
 
 import json
@@ -9,8 +10,8 @@ import re
 
 from cortex.domain.constants import SOURCE_WEIGHTS
 
-
-CLASSIFY_PROMPT = """Analyze the following content and classify it along three information dimensions.
+CLASSIFY_PROMPT = """Analyze the following content and classify it
+along three information dimensions.
 Return ONLY valid JSON with these fields:
 
 1. source_type: How was this information obtained?

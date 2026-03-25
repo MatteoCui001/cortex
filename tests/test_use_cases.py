@@ -7,14 +7,13 @@ Tests cover:
 - ContradictionDetector (3 tests)
 - PushDetector (4 tests)
 """
+
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import Optional
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
 import httpx
 import pytest
@@ -24,7 +23,6 @@ from cortex.domain.entities import (
     EventType,
     KnowledgeEvent,
     PushNotification,
-    SearchResult,
     ThesisCoverage,
 )
 from cortex.use_cases.contradiction import ContradictionDetector
@@ -33,10 +31,10 @@ from cortex.use_cases.ingest_link import IngestLinkUseCase
 from cortex.use_cases.push_detector import PushDetector
 from tests.conftest import FakeEmbedding, FakeLLM, FakeStorage
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_event(**kwargs) -> KnowledgeEvent:
     defaults = dict(
@@ -61,8 +59,8 @@ def _make_event(**kwargs) -> KnowledgeEvent:
 # IngestLinkUseCase tests
 # ---------------------------------------------------------------------------
 
-class TestIngestLinkUseCase:
 
+class TestIngestLinkUseCase:
     def _make_use_case(self, storage=None, embedding=None, llm=None):
         return IngestLinkUseCase(
             storage=storage or FakeStorage(),
@@ -126,9 +124,7 @@ class TestIngestLinkUseCase:
         response = httpx.Response(404, request=request)
 
         async def fake_get(self_client, url, **kwargs):
-            raise httpx.HTTPStatusError(
-                "404 Not Found", request=request, response=response
-            )
+            raise httpx.HTTPStatusError("404 Not Found", request=request, response=response)
 
         monkeypatch.setattr(httpx.AsyncClient, "get", fake_get)
 
@@ -141,7 +137,7 @@ class TestIngestLinkUseCase:
         """Ingesting the same URL twice completes without error on the second call."""
         html = (
             "<html><head><title>Dedup Article</title></head>"
-            "<body><p>Content for dedup test. Enough text to pass the empty check.</p></body></html>"
+            "<body><p>Content for dedup test. </p></body></html>"
         )
 
         fake_response = MagicMock()
@@ -172,8 +168,8 @@ class TestIngestLinkUseCase:
 # IngestFileUseCase tests
 # ---------------------------------------------------------------------------
 
-class TestIngestFileUseCase:
 
+class TestIngestFileUseCase:
     def _make_use_case(self, storage=None, embedding=None, llm=None):
         return IngestFileUseCase(
             storage=storage or FakeStorage(),
@@ -186,7 +182,9 @@ class TestIngestFileUseCase:
     async def test_txt_file_ingestion(self, tmp_path):
         """A .txt file is ingested with source='file' and raw_input_type='file'."""
         txt_file = tmp_path / "notes.txt"
-        txt_file.write_text("This is a plain text document with interesting content.", encoding="utf-8")
+        txt_file.write_text(
+            "This is a plain text document with interesting content.", encoding="utf-8"
+        )
 
         use_case = self._make_use_case()
         event = await use_case.import_file(str(txt_file))
@@ -225,7 +223,9 @@ class TestIngestFileUseCase:
         import cortex.use_cases.ingest_file as ingest_file_module
 
         def fake_extract_pdf(path):
-            raise ImportError("PDF extraction requires pymupdf or pdfplumber. Install: pip install pymupdf")
+            raise ImportError(
+                "PDF extraction requires pymupdf or pdfplumber. Install: pip install pymupdf"
+            )
 
         monkeypatch.setattr(ingest_file_module, "_extract_pdf", fake_extract_pdf)
 
@@ -238,8 +238,8 @@ class TestIngestFileUseCase:
 # ContradictionDetector tests
 # ---------------------------------------------------------------------------
 
-class TestContradictionDetector:
 
+class TestContradictionDetector:
     @pytest.mark.asyncio
     async def test_no_llm_returns_empty(self):
         """ContradictionDetector with llm=None always returns an empty list."""
@@ -281,17 +281,21 @@ class TestContradictionDetector:
         llm = FakeLLM()
 
         # Two existing events with different IDs and content
-        existing_a = _make_event(id="existing-a", title="Event A", content="Company X is growing fast")
+        existing_a = _make_event(
+            id="existing-a", title="Event A", content="Company X is growing fast"
+        )
         existing_b = _make_event(id="existing-b", title="Event B", content="Company X is shrinking")
         await storage.insert_event(existing_a)
         await storage.insert_event(existing_b)
 
-        contradiction_json = json.dumps({
-            "signal_type": "contradiction",
-            "topic": "test",
-            "summary": "conflict between A and B",
-            "confidence": 0.9,
-        })
+        contradiction_json = json.dumps(
+            {
+                "signal_type": "contradiction",
+                "topic": "test",
+                "summary": "conflict between A and B",
+                "confidence": 0.9,
+            }
+        )
 
         async def fake_chat(self_llm, prompt: str) -> str:
             return contradiction_json
@@ -314,6 +318,7 @@ class TestContradictionDetector:
 # ---------------------------------------------------------------------------
 # PushDetector tests
 # ---------------------------------------------------------------------------
+
 
 class FakeStorageWithStaleCoverage(FakeStorage):
     """FakeStorage that returns a stale ThesisCoverage for thesis detection tests."""
@@ -346,7 +351,6 @@ class FakeStorageWithMomentum(FakeStorage):
 
 
 class TestPushDetector:
-
     @pytest.mark.asyncio
     async def test_stale_thesis_notification(self):
         """A thesis with days_since_update >= 30 and event_count > 0 triggers a notification."""
@@ -373,7 +377,7 @@ class TestPushDetector:
 
     @pytest.mark.asyncio
     async def test_entity_momentum_spike(self):
-        """An entity with >= 5 mentions in the last 7 days triggers a momentum spike notification."""
+        """An entity with >= 5 mentions in 7 days triggers a momentum spike."""
         momentum_data = [
             {"name": "OpenAI", "type": "company", "mentions": 10},
         ]

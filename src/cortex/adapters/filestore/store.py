@@ -1,6 +1,7 @@
 """
 File Store adapter: human-readable storage of original input files.
 """
+
 from __future__ import annotations
 
 import re
@@ -10,7 +11,6 @@ from pathlib import Path
 from typing import Optional
 
 from cortex.domain.ports import FileStorePort
-
 
 # Map raw_input_type to store subdirectory
 _TYPE_DIR = {
@@ -24,7 +24,6 @@ _TYPE_DIR = {
 
 
 class FileStore(FileStorePort):
-
     def __init__(self, root: str | Path):
         self.root = Path(root).expanduser()
         self._ensure_dirs()

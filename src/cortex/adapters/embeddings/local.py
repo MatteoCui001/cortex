@@ -1,10 +1,10 @@
 """Local embedding adapter using sentence-transformers.
 Falls back to n-gram hash if sentence-transformers is not installed."""
+
 from __future__ import annotations
 
 import hashlib
 import struct
-from typing import Optional
 
 from cortex.domain.ports import EmbeddingPort
 
@@ -23,7 +23,11 @@ class LocalEmbedding(EmbeddingPort):
 
     def _load_model(self):
         try:
-            import os, sys, io, warnings, logging
+            import io
+            import logging
+            import os
+            import sys
+            import warnings
 
             # Suppress HF Hub noise
             os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -38,6 +42,7 @@ class LocalEmbedding(EmbeddingPort):
 
             try:
                 from sentence_transformers import SentenceTransformer
+
                 self._st_model = SentenceTransformer(self._model_name)
                 self._dims = self._st_model.get_sentence_embedding_dimension()
             finally:
@@ -69,7 +74,7 @@ def _ngram_hash(text: str, dims: int, n: int = 3) -> list[float]:
     vec = [0.0] * dims
     text = text.lower().strip()
     for i in range(max(1, len(text) - n + 1)):
-        gram = text[i:i + n]
+        gram = text[i : i + n]
         h = hashlib.md5(gram.encode()).digest()
         idx = struct.unpack("<H", h[:2])[0] % dims
         val = struct.unpack("<f", h[4:8])[0]

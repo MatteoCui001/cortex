@@ -1,13 +1,14 @@
 """Tests for parse_classification (LLM response parser)."""
+
 import json
 
 from cortex.adapters.llm.classifier import parse_classification
 from cortex.domain.constants import SOURCE_WEIGHTS
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _valid_payload(**overrides) -> dict:
     base = {
@@ -24,6 +25,7 @@ def _valid_payload(**overrides) -> dict:
 # ---------------------------------------------------------------------------
 # Valid JSON input
 # ---------------------------------------------------------------------------
+
 
 def test_parses_valid_json():
     payload = _valid_payload()
@@ -51,6 +53,7 @@ def test_source_weight_for_each_known_type():
 # Markdown code-fence wrapping
 # ---------------------------------------------------------------------------
 
+
 def test_parses_markdown_json_fence():
     payload = _valid_payload()
     wrapped = f"```json\n{json.dumps(payload)}\n```"
@@ -68,6 +71,7 @@ def test_parses_markdown_fence_no_language_tag():
 # ---------------------------------------------------------------------------
 # Defaults on missing fields
 # ---------------------------------------------------------------------------
+
 
 def test_missing_source_type_defaults_to_published():
     result = parse_classification(json.dumps({}))
@@ -103,6 +107,7 @@ def test_unknown_source_type_weight_defaults_to_half():
 # Malformed / unparseable input
 # ---------------------------------------------------------------------------
 
+
 def test_empty_string_returns_defaults():
     result = parse_classification("")
     assert result["source_type"] == "published"
@@ -126,7 +131,14 @@ def test_broken_json_in_fence_returns_defaults():
 
 
 def test_result_always_has_required_keys():
-    required = {"source_type", "source_weight", "nature_tags", "temporality", "key_points", "stance"}
+    required = {
+        "source_type",
+        "source_weight",
+        "nature_tags",
+        "temporality",
+        "key_points",
+        "stance",
+    }
     for text in ("", "{}", "garbage", '{"source_type": "expert"}'):
         result = parse_classification(text)
         assert required <= result.keys(), f"Missing keys for input: {text!r}"

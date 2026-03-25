@@ -3,20 +3,20 @@ Integration tests for the Cortex REST API.
 
 Uses TestClient with fake adapters — no real database or LLM required.
 """
+
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 
 from cortex.domain.entities import EventType, KnowledgeEvent
-from datetime import datetime, timezone
-
 
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
 
 def _make_event(**kwargs) -> KnowledgeEvent:
     defaults = dict(
@@ -40,6 +40,7 @@ def _make_event(**kwargs) -> KnowledgeEvent:
 # ------------------------------------------------------------------
 # Happy-path tests
 # ------------------------------------------------------------------
+
 
 def test_stats_returns_valid_structure(client):
     """GET /api/v1/stats returns a dict with event count fields."""
@@ -92,8 +93,6 @@ def test_ingest_text_creates_event_returns_201(client):
 def test_ingest_url_creates_event_returns_201(client, fake_storage, monkeypatch):
     """POST /api/v1/events/ingest with a URL triggers the link pipeline and returns 201."""
     # Patch IngestLinkUseCase so we don't hit the network
-    from cortex.domain.entities import KnowledgeEvent, EventType
-    from datetime import datetime, timezone
 
     dummy_event = _make_event(title="Fetched Article", source="link")
 
@@ -104,7 +103,6 @@ def test_ingest_url_creates_event_returns_201(client, fake_storage, monkeypatch)
         async def import_link(self, url, user_annotation=None):
             return dummy_event
 
-    import cortex.api.routes as routes_module
     monkeypatch.setattr(
         "cortex.use_cases.ingest_link.IngestLinkUseCase",
         FakeLinkUseCase,
@@ -208,6 +206,7 @@ def test_thesis_evidence_returns_list(client, fake_storage):
 # Error scenarios
 # ------------------------------------------------------------------
 
+
 def test_ingest_empty_body_still_creates_event(client):
     """POST /api/v1/events/ingest with empty body — all fields optional, text branch runs."""
     response = client.post("/api/v1/events/ingest", json={})
@@ -237,9 +236,11 @@ def test_ingest_invalid_url_returns_500(fake_storage, fake_embedding, fake_llm, 
             raise ValueError(f"Cannot fetch URL: {url}")
 
     import cortex.use_cases.ingest_link as ingest_link_module
+
     monkeypatch.setattr(ingest_link_module, "IngestLinkUseCase", FakeLinkUseCaseRaises)
 
     from tests.conftest import _build_test_app
+
     app = _build_test_app(fake_storage, fake_embedding, fake_llm)
     error_client = TestClient(app, raise_server_exceptions=False)
 

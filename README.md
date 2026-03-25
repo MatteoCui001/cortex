@@ -27,7 +27,7 @@ Working features:
 
 - macOS with Homebrew
 - Python 3.11+ and [uv](https://docs.astral.sh/uv/)
-- PostgreSQL 16 with pgvector + zhparser
+- PostgreSQL 17 with pgvector + zhparser
 
 ### Install
 

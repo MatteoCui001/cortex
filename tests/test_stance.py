@@ -1,27 +1,31 @@
 """Tests for parse_user_stance (pattern-based stance detection)."""
+
 import pytest
 
 from cortex.domain.stance import parse_user_stance
 
-
 # ---------------------------------------------------------------------------
 # Chinese patterns
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("text", ["有道理", "认同", "同意", "对的", "是的", "没错", "赞同"])
 def test_chinese_agree_patterns(text):
     assert parse_user_stance(text) == "agree"
 
 
-@pytest.mark.parametrize("text,expected", [
-    ("不对", "disagree"),
-    ("扯淡", "disagree"),
-    ("不认同", "disagree"),
-    ("不同意", "disagree"),
-    ("错", "disagree"),
-    ("胡说", "disagree"),
-    ("瞎说", "disagree"),
-])
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("不对", "disagree"),
+        ("扯淡", "disagree"),
+        ("不认同", "disagree"),
+        ("不同意", "disagree"),
+        ("错", "disagree"),
+        ("胡说", "disagree"),
+        ("瞎说", "disagree"),
+    ],
+)
 def test_chinese_disagree_patterns(text, expected):
     assert parse_user_stance(text) == expected
 
@@ -39,6 +43,7 @@ def test_chinese_skip_patterns(text):
 # ---------------------------------------------------------------------------
 # English patterns
 # ---------------------------------------------------------------------------
+
 
 def test_english_agree():
     assert parse_user_stance("agree") == "agree"
@@ -96,6 +101,7 @@ def test_english_skip_not_relevant():
 # Case insensitivity
 # ---------------------------------------------------------------------------
 
+
 def test_uppercase_agree():
     assert parse_user_stance("AGREE") == "agree"
 
@@ -107,6 +113,7 @@ def test_mixed_case_disagree():
 # ---------------------------------------------------------------------------
 # Edge cases — should return None
 # ---------------------------------------------------------------------------
+
 
 def test_empty_string_returns_none():
     assert parse_user_stance("") is None

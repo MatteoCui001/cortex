@@ -2,6 +2,7 @@
 Shared fixtures for the Cortex test suite.
 Provides fake adapters and a TestClient wired with them.
 """
+
 from __future__ import annotations
 
 import uuid
@@ -15,8 +16,8 @@ from fastapi.testclient import TestClient
 from cortex.api.routes import router
 from cortex.domain.entities import (
     Annotation,
-    KnowledgeEvent,
     EventType,
+    KnowledgeEvent,
     SearchResult,
     ThesisCoverage,
 )
@@ -25,10 +26,10 @@ from cortex.use_cases.analyze import AnalyzeUseCase
 from cortex.use_cases.ingest import IngestUseCase
 from cortex.use_cases.search import SearchUseCase
 
-
 # ------------------------------------------------------------------
 # Fake adapters
 # ------------------------------------------------------------------
+
 
 class FakeStorage(StoragePort):
     """In-memory storage for tests."""
@@ -69,18 +70,22 @@ class FakeStorage(StoragePort):
 
     # --- reads ---
 
-    async def get_event(self, event_id: str, workspace_id: str = "default") -> Optional[KnowledgeEvent]:
+    async def get_event(
+        self, event_id: str, workspace_id: str = "default"
+    ) -> Optional[KnowledgeEvent]:
         return self._events.get(event_id)
 
-    async def semantic_search(self, embedding, *, workspace_id="default", limit=10,
-                              type_filter=None, min_score=0.0) -> list[SearchResult]:
+    async def semantic_search(
+        self, embedding, *, workspace_id="default", limit=10, type_filter=None, min_score=0.0
+    ) -> list[SearchResult]:
         results = []
         for ev in list(self._events.values())[:limit]:
             results.append(SearchResult(event=ev, score=0.9, match_type="semantic"))
         return results
 
-    async def fulltext_search(self, query, *, workspace_id="default", limit=10,
-                              type_filter=None) -> list[SearchResult]:
+    async def fulltext_search(
+        self, query, *, workspace_id="default", limit=10, type_filter=None
+    ) -> list[SearchResult]:
         results = []
         for ev in list(self._events.values())[:limit]:
             results.append(SearchResult(event=ev, score=0.8, match_type="fulltext"))
@@ -92,7 +97,9 @@ class FakeStorage(StoragePort):
     async def get_relations_for(self, object_id, workspace_id="default") -> list[dict]:
         return []
 
-    async def find_related(self, event_id, *, workspace_id="default", limit=10) -> list[SearchResult]:
+    async def find_related(
+        self, event_id, *, workspace_id="default", limit=10
+    ) -> list[SearchResult]:
         return []
 
     async def stale_events(self, days=30, workspace_id="default") -> list[KnowledgeEvent]:
@@ -136,18 +143,22 @@ class FakeStorage(StoragePort):
     async def merge_entities(self, keep_id, remove_id):
         pass
 
-    async def semantic_search_entities(self, embedding, *, workspace_id="default",
-                                       entity_types=None, limit=20) -> list[dict]:
+    async def semantic_search_entities(
+        self, embedding, *, workspace_id="default", entity_types=None, limit=20
+    ) -> list[dict]:
         return []
 
-    async def get_events_for_entity(self, entity_id, workspace_id="default", limit=50) -> list[KnowledgeEvent]:
+    async def get_events_for_entity(
+        self, entity_id, workspace_id="default", limit=50
+    ) -> list[KnowledgeEvent]:
         return []
 
     async def recent_events_by_thesis(self, days=1, workspace_id="default") -> list[dict]:
         return []
 
-    async def high_confidence_recent(self, days=7, min_confidence=0.8,
-                                     workspace_id="default", limit=10) -> list[KnowledgeEvent]:
+    async def high_confidence_recent(
+        self, days=7, min_confidence=0.8, workspace_id="default", limit=10
+    ) -> list[KnowledgeEvent]:
         return []
 
     async def entity_momentum(self, days=7, workspace_id="default", limit=10) -> list[dict]:
@@ -162,15 +173,19 @@ class FakeStorage(StoragePort):
 
     async def get_annotations(self, workspace_id, target_type, target_id) -> list:
         return [
-            a for a in self._annotations
+            a
+            for a in self._annotations
             if a.target_type == target_type and a.target_id == target_id
         ]
 
-    async def get_events_without_classification(self, workspace_id="default", limit=50) -> list[KnowledgeEvent]:
+    async def get_events_without_classification(
+        self, workspace_id="default", limit=50
+    ) -> list[KnowledgeEvent]:
         return []
 
-    async def update_event_classification(self, event_id, source_type, source_weight,
-                                          nature_tags, temporality, key_points, stance):
+    async def update_event_classification(
+        self, event_id, source_type, source_weight, nature_tags, temporality, key_points, stance
+    ):
         pass
 
 
@@ -223,6 +238,7 @@ class FakeLLM(LLMPort):
 # ------------------------------------------------------------------
 # Fixtures
 # ------------------------------------------------------------------
+
 
 def _build_test_app(storage: FakeStorage, embedding: FakeEmbedding, llm: FakeLLM) -> FastAPI:
     """Create a bare FastAPI app wired with fake adapters (no lifespan)."""

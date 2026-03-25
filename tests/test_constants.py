@@ -1,4 +1,5 @@
 """Tests for domain constants."""
+
 from cortex.domain.constants import (
     EVENT_TYPES,
     NATURE_TAGS,
