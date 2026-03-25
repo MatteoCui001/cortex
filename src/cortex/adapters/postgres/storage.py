@@ -11,6 +11,7 @@ import asyncpg
 
 from cortex.domain.entities import (
     ContradictionResult, Entity, EntityType, EventType, KnowledgeEvent,
+    Notification, NotificationChannel, NotificationStatus,
     Relation, RelationType, SearchResult, SignalFeedback, ThesisCoverage,
 )
 from cortex.domain.ports import StoragePort
@@ -786,6 +787,101 @@ class PostgresStorage(StoragePort):
             for r in rows
         ]
 
+    # ------------------------------------------------------------------
+    # Phase 4: Notification operations
+    # ------------------------------------------------------------------
+
+    async def insert_notification(self, notification: Notification) -> str:
+        sql = """
+        INSERT INTO notifications (
+            id, workspace_id, source_kind, source_id, dedup_key,
+            title, body, priority, status, channel,
+            related_event_ids, signal_id, cooldown_until,
+            created_at, delivered_at, acted_at
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        ON CONFLICT (workspace_id, dedup_key)
+            WHERE status NOT IN ('acked','dismissed','failed')
+        DO NOTHING
+        RETURNING id
+        """
+        row = await self._pool.fetchrow(
+            sql,
+            notification.id, notification.workspace_id,
+            notification.source_kind, notification.source_id,
+            notification.dedup_key,
+            notification.title, notification.body,
+            notification.priority, notification.status.value,
+            notification.channel.value,
+            json.dumps(notification.related_event_ids),
+            notification.signal_id, notification.cooldown_until,
+            notification.created_at, notification.delivered_at,
+            notification.acted_at,
+        )
+        return str(row["id"]) if row else notification.id
+
+    async def get_notifications(
+        self,
+        workspace_id: str,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[Notification]:
+        if status:
+            sql = """
+            SELECT * FROM notifications
+            WHERE workspace_id = $1 AND status = $2
+            ORDER BY created_at DESC LIMIT $3
+            """
+            rows = await self._pool.fetch(sql, workspace_id, status, limit)
+        else:
+            sql = """
+            SELECT * FROM notifications
+            WHERE workspace_id = $1
+            ORDER BY created_at DESC LIMIT $2
+            """
+            rows = await self._pool.fetch(sql, workspace_id, limit)
+        return [_row_to_notification(row) for row in rows]
+
+    async def get_notification(
+        self,
+        notification_id: str,
+        workspace_id: str = "default",
+    ) -> Optional[Notification]:
+        row = await self._pool.fetchrow(
+            "SELECT * FROM notifications WHERE id = $1::uuid AND workspace_id = $2",
+            notification_id, workspace_id,
+        )
+        return _row_to_notification(row) if row else None
+
+    async def update_notification_status(
+        self,
+        notification_id: str,
+        new_status: NotificationStatus,
+        *,
+        delivered_at=None,
+        acted_at=None,
+    ) -> bool:
+        sql = """
+        UPDATE notifications
+        SET status = $1, delivered_at = COALESCE($2, delivered_at),
+            acted_at = COALESCE($3, acted_at)
+        WHERE id = $4::uuid
+        """
+        result = await self._pool.execute(
+            sql, new_status.value, delivered_at, acted_at, notification_id,
+        )
+        return result.endswith("1")  # "UPDATE 1"
+
+    async def check_dedup(self, workspace_id: str, dedup_key: str) -> bool:
+        row = await self._pool.fetchrow(
+            """SELECT 1 FROM notifications
+               WHERE workspace_id = $1 AND dedup_key = $2
+                 AND status NOT IN ('acked','dismissed','failed')""",
+            workspace_id, dedup_key,
+        )
+        return row is not None
+
+
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
@@ -866,4 +962,27 @@ def _row_to_signal(row: asyncpg.Record) -> ContradictionResult:
         workspace_id=row["workspace_id"],
         created_at=row["created_at"],
         thesis_links=thesis,
+    )
+
+
+def _row_to_notification(row: asyncpg.Record) -> Notification:
+    """Convert a database row to a Notification."""
+    related = _safe_json_col(row, "related_event_ids", [])
+    return Notification(
+        title=row["title"],
+        body=row["body"],
+        source_kind=row["source_kind"],
+        source_id=row["source_id"],
+        dedup_key=row["dedup_key"],
+        id=str(row["id"]),
+        workspace_id=row["workspace_id"],
+        priority=row["priority"],
+        status=NotificationStatus(row["status"]),
+        channel=NotificationChannel(row["channel"]),
+        related_event_ids=related,
+        signal_id=str(row["signal_id"]) if row["signal_id"] else None,
+        cooldown_until=row["cooldown_until"],
+        created_at=row["created_at"],
+        delivered_at=row["delivered_at"],
+        acted_at=row["acted_at"],
     )

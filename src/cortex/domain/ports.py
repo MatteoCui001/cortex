@@ -9,8 +9,9 @@ from datetime import date
 from typing import Optional
 
 from cortex.domain.entities import (
-    ContradictionResult, KnowledgeEvent, Entity, Relation,
-    SearchResult, SignalFeedback, ThesisCoverage,
+    ContradictionResult, KnowledgeEvent, Entity, Notification,
+    NotificationStatus, Relation, SearchResult, SignalFeedback,
+    ThesisCoverage,
 )
 
 
@@ -270,6 +271,51 @@ class StoragePort(ABC):
         workspace_id: str,
     ) -> list[dict]:
         """Per-thesis feedback stats: [{thesis_link, useful, not_useful, wrong}]."""
+
+    # ------------------------------------------------------------------
+    # Phase 4: Notification operations
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def insert_notification(self, notification: Notification) -> str:
+        """Insert a notification. Returns notification id."""
+
+    @abstractmethod
+    async def get_notifications(
+        self,
+        workspace_id: str,
+        *,
+        status: Optional[str] = None,
+        limit: int = 50,
+    ) -> list[Notification]:
+        """Get notifications, optionally filtered by status."""
+
+    @abstractmethod
+    async def get_notification(
+        self,
+        notification_id: str,
+        workspace_id: str = "default",
+    ) -> Optional[Notification]:
+        """Get a single notification by id."""
+
+    @abstractmethod
+    async def update_notification_status(
+        self,
+        notification_id: str,
+        new_status: NotificationStatus,
+        *,
+        delivered_at: Optional[object] = None,
+        acted_at: Optional[object] = None,
+    ) -> bool:
+        """Update notification status. Returns True if row was updated."""
+
+    @abstractmethod
+    async def check_dedup(
+        self,
+        workspace_id: str,
+        dedup_key: str,
+    ) -> bool:
+        """True if an active (non-terminal) notification with this dedup_key exists."""
 
 
 class FileStorePort(ABC):

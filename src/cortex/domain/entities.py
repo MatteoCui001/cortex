@@ -180,7 +180,7 @@ class SignalFeedback:
 
 @dataclass
 class PushNotification:
-    """A proactive notification for the user."""
+    """A proactive notification for the user (transient, computed)."""
     trigger_type: str       # contradiction_detected|question_answered|thesis_stale|entity_momentum_spike
     title: str
     body: str
@@ -190,3 +190,68 @@ class PushNotification:
     created_at: datetime = field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
+
+
+# ------------------------------------------------------------------
+# Phase 4: Persistent Notifications
+# ------------------------------------------------------------------
+
+class NotificationStatus(str, Enum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    READ = "read"
+    ACKED = "acked"
+    DISMISSED = "dismissed"
+    FAILED = "failed"
+
+
+class NotificationChannel(str, Enum):
+    INBOX = "inbox"
+    WEBHOOK = "webhook"
+
+
+# State machine: which transitions are legal from each status.
+VALID_TRANSITIONS: dict[NotificationStatus, set[NotificationStatus]] = {
+    NotificationStatus.PENDING:   {NotificationStatus.DELIVERED, NotificationStatus.ACKED, NotificationStatus.DISMISSED, NotificationStatus.FAILED},
+    NotificationStatus.DELIVERED: {NotificationStatus.READ, NotificationStatus.ACKED, NotificationStatus.DISMISSED},
+    NotificationStatus.READ:      {NotificationStatus.ACKED, NotificationStatus.DISMISSED},
+    NotificationStatus.ACKED:     set(),   # terminal
+    NotificationStatus.DISMISSED: set(),   # terminal
+    NotificationStatus.FAILED:    set(),   # terminal
+}
+
+
+@dataclass
+class Notification:
+    """A persistent notification with state machine lifecycle."""
+    title: str
+    body: str
+    source_kind: str          # signal | thesis_stale | entity_momentum
+    source_id: str = ""
+    dedup_key: str = ""       # defaults to f"{source_kind}:{source_id}"
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str = "default"
+    priority: str = "medium"  # high | medium | low
+    status: NotificationStatus = NotificationStatus.PENDING
+    channel: NotificationChannel = NotificationChannel.INBOX
+    related_event_ids: list[str] = field(default_factory=list)
+    signal_id: Optional[str] = None
+    cooldown_until: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    delivered_at: Optional[datetime] = None
+    acted_at: Optional[datetime] = None
+
+    def __post_init__(self):
+        if not self.dedup_key:
+            self.dedup_key = f"{self.source_kind}:{self.source_id}"
+        if not self.created_at:
+            self.created_at = datetime.now(timezone.utc)
+
+    def transition(self, new_status: NotificationStatus) -> None:
+        """Advance to new_status or raise ValueError if transition is illegal."""
+        allowed = VALID_TRANSITIONS.get(self.status, set())
+        if new_status not in allowed:
+            raise ValueError(
+                f"Cannot transition from {self.status.value} to {new_status.value}"
+            )
+        self.status = new_status

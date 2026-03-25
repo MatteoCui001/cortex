@@ -72,6 +72,26 @@ class NotificationResponse(BaseModel):
     related_event_ids: list[str] = []
 
 
+class NotificationDetailResponse(BaseModel):
+    id: str
+    source_kind: str
+    source_id: str
+    title: str
+    body: str
+    priority: str
+    status: str
+    channel: str
+    signal_id: Optional[str] = None
+    related_event_ids: list[str] = []
+    created_at: str
+    delivered_at: Optional[str] = None
+    acted_at: Optional[str] = None
+
+
+class AckRequest(BaseModel):
+    signal_feedback_id: Optional[str] = None
+
+
 class SignalResponse(BaseModel):
     id: str
     new_event_id: str
@@ -362,25 +382,68 @@ async def get_annotations(target_type: str, target_id: str, request: Request):
     ]
 
 
-# --- Phase 3: Notifications ---
+# --- Phase 4: Persistent Notifications ---
 
-@router.get("/notifications")
-async def get_notifications(request: Request):
-    """Get proactive push notifications."""
+@router.get("/notifications", response_model=list[NotificationDetailResponse])
+async def get_notifications(
+    request: Request,
+    status: Optional[str] = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    refresh: bool = Query(False),
+):
+    """Get persistent notifications (optionally refresh via detector first)."""
+    workspace = request.app.state.config.get("workspace", "default")
+    if refresh:
+        from cortex.use_cases.push_detector import PushDetector
+        from cortex.use_cases.notification_manager import NotificationManager
+        detector = PushDetector(request.app.state.storage, workspace)
+        manager = NotificationManager(request.app.state.storage, detector, workspace_id=workspace)
+        await manager.process()
+    results = await request.app.state.storage.get_notifications(
+        workspace, status=status, limit=limit,
+    )
+    return [_notification_to_response(n) for n in results]
+
+
+@router.post("/notifications/{notification_id}/read",
+             response_model=NotificationDetailResponse)
+async def mark_notification_read(notification_id: str, request: Request):
+    """Mark a notification as read."""
+    from cortex.domain.entities import NotificationStatus
+    return await _transition_notification(request, notification_id, NotificationStatus.READ)
+
+
+@router.post("/notifications/{notification_id}/ack",
+             response_model=NotificationDetailResponse)
+async def mark_notification_acked(notification_id: str, request: Request, body: AckRequest = None):
+    """Mark a notification as acknowledged."""
+    from cortex.domain.entities import NotificationStatus
+    return await _transition_notification(request, notification_id, NotificationStatus.ACKED)
+
+
+@router.post("/notifications/{notification_id}/dismiss",
+             response_model=NotificationDetailResponse)
+async def mark_notification_dismissed(notification_id: str, request: Request):
+    """Dismiss a notification."""
+    from cortex.domain.entities import NotificationStatus
+    return await _transition_notification(request, notification_id, NotificationStatus.DISMISSED)
+
+
+async def _transition_notification(request, notification_id, new_status):
+    """Shared transition logic for notification action endpoints."""
     from cortex.use_cases.push_detector import PushDetector
+    from cortex.use_cases.notification_manager import NotificationManager
     workspace = request.app.state.config.get("workspace", "default")
     detector = PushDetector(request.app.state.storage, workspace)
-    notifications = await detector.check_all()
-    return [
-        NotificationResponse(
-            trigger_type=n.trigger_type,
-            title=n.title,
-            body=n.body,
-            priority=n.priority,
-            related_event_ids=n.related_event_ids,
-        )
-        for n in notifications
-    ]
+    manager = NotificationManager(request.app.state.storage, detector, workspace_id=workspace)
+    try:
+        notif = await manager.transition(notification_id, new_status)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=409, detail=msg)
+    return _notification_to_response(notif)
 
 
 # --- Phase 3.6: Signals ---
@@ -451,6 +514,24 @@ def _signal_to_response(s) -> SignalResponse:
         evidence_event_ids=s.evidence_event_ids,
         thesis_links=getattr(s, "thesis_links", []),
         created_at=s.created_at.isoformat() if s.created_at else "",
+    )
+
+
+def _notification_to_response(n) -> NotificationDetailResponse:
+    return NotificationDetailResponse(
+        id=n.id,
+        source_kind=n.source_kind,
+        source_id=n.source_id,
+        title=n.title,
+        body=n.body,
+        priority=n.priority,
+        status=n.status.value if hasattr(n.status, "value") else str(n.status),
+        channel=n.channel.value if hasattr(n.channel, "value") else str(n.channel),
+        signal_id=n.signal_id,
+        related_event_ids=n.related_event_ids,
+        created_at=n.created_at.isoformat() if n.created_at else "",
+        delivered_at=n.delivered_at.isoformat() if n.delivered_at else None,
+        acted_at=n.acted_at.isoformat() if n.acted_at else None,
     )
 
 

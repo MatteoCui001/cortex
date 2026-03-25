@@ -321,3 +321,81 @@ class TestSignalAPI:
         response = client.get("/api/v1/signals/thesis-feedback")
         assert response.status_code == 200
         assert isinstance(response.json(), list)
+
+
+# ------------------------------------------------------------------
+# Phase 4: Notification API tests
+# ------------------------------------------------------------------
+
+class TestNotificationAPI:
+
+    def test_get_notifications_returns_empty_list(self, client):
+        response = client.get("/api/v1/notifications")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_get_notifications_returns_stored(self, client, fake_storage):
+        from cortex.domain.entities import Notification
+        import asyncio
+        n = Notification(title="Test", body="Body", source_kind="signal")
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.get("/api/v1/notifications")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["title"] == "Test"
+
+    def test_get_notifications_filter_by_status(self, client, fake_storage):
+        from cortex.domain.entities import Notification, NotificationStatus
+        import asyncio
+        n1 = Notification(title="A", body="a", source_kind="signal")
+        n2 = Notification(title="B", body="b", source_kind="signal",
+                          status=NotificationStatus.DELIVERED)
+        asyncio.run(fake_storage.insert_notification(n1))
+        asyncio.run(fake_storage.insert_notification(n2))
+        response = client.get("/api/v1/notifications?status=pending")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["status"] == "pending"
+
+    def test_mark_notification_read(self, client, fake_storage):
+        from cortex.domain.entities import Notification, NotificationStatus
+        import asyncio
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.DELIVERED)
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.post(f"/api/v1/notifications/{n.id}/read")
+        assert response.status_code == 200
+        assert response.json()["status"] == "read"
+
+    def test_mark_notification_acked(self, client, fake_storage):
+        from cortex.domain.entities import Notification
+        import asyncio
+        n = Notification(title="T", body="B", source_kind="signal")
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.post(f"/api/v1/notifications/{n.id}/ack")
+        assert response.status_code == 200
+        assert response.json()["status"] == "acked"
+
+    def test_mark_notification_dismissed(self, client, fake_storage):
+        from cortex.domain.entities import Notification
+        import asyncio
+        n = Notification(title="T", body="B", source_kind="signal")
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.post(f"/api/v1/notifications/{n.id}/dismiss")
+        assert response.status_code == 200
+        assert response.json()["status"] == "dismissed"
+
+    def test_invalid_transition_returns_409(self, client, fake_storage):
+        from cortex.domain.entities import Notification, NotificationStatus
+        import asyncio
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.ACKED)
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.post(f"/api/v1/notifications/{n.id}/read")
+        assert response.status_code == 409
+
+    def test_unknown_notification_returns_404(self, client):
+        response = client.post("/api/v1/notifications/nonexistent/read")
+        assert response.status_code == 404

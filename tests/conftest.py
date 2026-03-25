@@ -18,6 +18,8 @@ from cortex.domain.entities import (
     ContradictionResult,
     KnowledgeEvent,
     EventType,
+    Notification,
+    NotificationStatus,
     SearchResult,
     SignalFeedback,
     ThesisCoverage,
@@ -40,6 +42,7 @@ class FakeStorage(StoragePort):
         self._annotations: list[Annotation] = []
         self._signals: list[ContradictionResult] = []
         self._signal_feedback: list[SignalFeedback] = []
+        self._notifications: dict[str, Notification] = {}
 
     def _make_event(self, **kwargs) -> KnowledgeEvent:
         defaults = dict(
@@ -224,6 +227,49 @@ class FakeStorage(StoragePort):
             if fb.verdict in thesis_stats[thesis]:
                 thesis_stats[thesis][fb.verdict] += 1
         return [{"thesis_link": k, **v} for k, v in thesis_stats.items()]
+
+    # --- Phase 4: Notification operations ---
+
+    async def insert_notification(self, notification: Notification) -> str:
+        self._notifications[notification.id] = notification
+        return notification.id
+
+    async def get_notifications(self, workspace_id, *, status=None, limit=50):
+        results = [
+            n for n in self._notifications.values()
+            if n.workspace_id == workspace_id
+        ]
+        if status:
+            results = [n for n in results if n.status.value == status]
+        results.sort(key=lambda n: n.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        return results[:limit]
+
+    async def get_notification(self, notification_id, workspace_id="default"):
+        n = self._notifications.get(notification_id)
+        if n and n.workspace_id == workspace_id:
+            return n
+        return None
+
+    async def update_notification_status(self, notification_id, new_status, *,
+                                          delivered_at=None, acted_at=None):
+        n = self._notifications.get(notification_id)
+        if not n:
+            return False
+        n.status = new_status
+        if delivered_at:
+            n.delivered_at = delivered_at
+        if acted_at:
+            n.acted_at = acted_at
+        return True
+
+    async def check_dedup(self, workspace_id, dedup_key):
+        terminal = {NotificationStatus.ACKED, NotificationStatus.DISMISSED, NotificationStatus.FAILED}
+        for n in self._notifications.values():
+            if (n.workspace_id == workspace_id
+                    and n.dedup_key == dedup_key
+                    and n.status not in terminal):
+                return True
+        return False
 
 
 class FakeEmbedding(EmbeddingPort):
