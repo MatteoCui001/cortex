@@ -1,6 +1,7 @@
 """
 LLM adapter for metadata extraction via OpenRouter-compatible API.
 """
+
 from __future__ import annotations
 
 import json
@@ -9,13 +10,13 @@ from typing import Optional
 
 import httpx
 
-from cortex.domain.ports import LLMPort
-from cortex.domain.stance import parse_user_stance
 from cortex.adapters.llm.classifier import (
     CLASSIFY_PROMPT,
     STANCE_PARSE_PROMPT,
     parse_classification,
 )
+from cortex.domain.ports import LLMPort
+from cortex.domain.stance import parse_user_stance
 
 EXTRACT_PROMPT = """Analyze the following content and extract structured metadata.
 Return ONLY valid JSON with these fields:
@@ -31,7 +32,6 @@ Content:
 
 
 class OpenRouterLLM(LLMPort):
-
     def __init__(
         self,
         api_key: str,
@@ -78,7 +78,10 @@ class OpenRouterLLM(LLMPort):
 
     async def summarize(self, content: str, max_length: int = 200) -> str:
         truncated = content[:4000] if len(content) > 4000 else content
-        prompt = f"Summarize the following in {max_length} characters or less, in the same language as the content:\n\n{truncated}"
+        prompt = (
+            f"Summarize the following in {max_length} characters or less,"
+            f" in the same language as the content:\n\n{truncated}"
+        )
         return await self._chat(prompt)
 
     async def chat(self, prompt: str) -> str:

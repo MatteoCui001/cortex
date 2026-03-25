@@ -2,16 +2,14 @@
 Proactive push detection engine.
 Produces structured PushNotification objects. Delivery is handled elsewhere.
 """
-from __future__ import annotations
 
-from datetime import datetime
+from __future__ import annotations
 
 from cortex.domain.entities import PushNotification
 from cortex.domain.ports import StoragePort
 
 
 class PushDetector:
-
     def __init__(self, storage: StoragePort, workspace_id: str = "default"):
         self._storage = storage
         self._workspace_id = workspace_id
@@ -29,14 +27,16 @@ class PushDetector:
         notifications = []
         for t in coverage:
             if t.days_since_update >= stale_days and t.event_count > 0:
-                notifications.append(PushNotification(
-                    trigger_type="thesis_stale",
-                    title=f"Thesis needs attention: {t.thesis_name}",
-                    body=f"No new evidence in {t.days_since_update} days. "
-                         f"{t.event_count} total events, avg confidence {t.avg_confidence:.2f}.",
-                    priority="medium",
-                    workspace_id=self._workspace_id,
-                ))
+                notifications.append(
+                    PushNotification(
+                        trigger_type="thesis_stale",
+                        title=f"Thesis needs attention: {t.thesis_name}",
+                        body=f"No new evidence in {t.days_since_update} days. "
+                        f"{t.event_count} total events, avg confidence {t.avg_confidence:.2f}.",
+                        priority="medium",
+                        workspace_id=self._workspace_id,
+                    )
+                )
         return notifications
 
     async def check_entity_momentum(
@@ -53,13 +53,18 @@ class PushDetector:
         notifications = []
         for ent in momentum:
             if ent["mentions"] >= threshold:
-                notifications.append(PushNotification(
-                    trigger_type="entity_momentum_spike",
-                    title=f"High activity: {ent['name']}",
-                    body=f"{ent['name']} ({ent['type']}) mentioned {ent['mentions']} times in {days} days.",
-                    priority="low",
-                    workspace_id=self._workspace_id,
-                ))
+                notifications.append(
+                    PushNotification(
+                        trigger_type="entity_momentum_spike",
+                        title=f"High activity: {ent['name']}",
+                        body=(
+                            f"{ent['name']} ({ent['type']}) mentioned"
+                            f" {ent['mentions']} times in {days} days."
+                        ),
+                        priority="low",
+                        workspace_id=self._workspace_id,
+                    )
+                )
         return notifications
 
     def from_contradiction(

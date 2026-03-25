@@ -1,11 +1,11 @@
 """
 FastAPI application factory.
 """
+
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
-import yaml
 from fastapi import FastAPI
 
 from cortex.adapters.embeddings.local import LocalEmbedding
@@ -20,6 +20,7 @@ from cortex.use_cases.search import SearchUseCase
 
 def load_config() -> dict:
     from cortex.cli.main import load_config as _load
+
     return _load()
 
 
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI):
     )
 
     import os
+
     api_key = llm_cfg.get("api_key", "") or ""
     if api_key.startswith("${") and api_key.endswith("}"):
         api_key = os.environ.get(api_key[2:-1], "")

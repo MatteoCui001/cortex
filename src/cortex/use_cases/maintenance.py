@@ -1,6 +1,7 @@
 """
 Maintenance use case: entity embeddings, tag normalization, entity deduplication.
 """
+
 from __future__ import annotations
 
 import re
@@ -11,7 +12,6 @@ from cortex.domain.ports import EmbeddingPort, StoragePort
 
 
 class MaintenanceUseCase:
-
     def __init__(
         self,
         storage: StoragePort,
@@ -31,9 +31,7 @@ class MaintenanceUseCase:
     ) -> dict:
         """Generate embeddings for all entities that lack them."""
         stats = {"processed": 0, "total": 0}
-        stats["total"] = await self._storage.count_entities_without_embedding(
-            self._workspace_id
-        )
+        stats["total"] = await self._storage.count_entities_without_embedding(self._workspace_id)
 
         while True:
             entities = await self._storage.get_entities_without_embedding(
@@ -46,9 +44,7 @@ class MaintenanceUseCase:
             embeddings = await self._embedding.embed_batch(texts)
 
             for ent, emb in zip(entities, embeddings):
-                await self._storage.update_entity_embedding(
-                    ent["id"], emb
-                )
+                await self._storage.update_entity_embedding(ent["id"], emb)
 
             stats["processed"] += len(entities)
             if on_progress:

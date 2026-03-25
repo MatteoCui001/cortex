@@ -4,6 +4,7 @@ Smoke tests for the Cortex CLI (src/cortex/cli/main.py).
 Strategy: the CLI parses sys.argv manually (no argparse). Tests patch sys.argv
 and mock the async command coroutines so no database or network is needed.
 """
+
 from __future__ import annotations
 
 import io
@@ -12,10 +13,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _run_main_with_argv(argv: list[str], capsys=None):
     """
@@ -41,6 +42,7 @@ def _run_main_with_argv(argv: list[str], capsys=None):
 # asyncio.run() completes instantly.
 # ---------------------------------------------------------------------------
 
+
 class TestCommandDispatch:
     """Verify that each token in sys.argv[1] routes to the right coroutine."""
 
@@ -56,6 +58,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_search") as mock_search:
             with patch.object(sys, "argv", ["cortex", "search", "test query"]):
                 from cortex.cli.main import main
+
                 main()
         mock_search.assert_awaited_once()
 
@@ -67,6 +70,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_import") as mock_import:
             with patch.object(sys, "argv", ["cortex", "import", "--vault", "/tmp/vault"]):
                 from cortex.cli.main import main
+
                 main()
         mock_import.assert_awaited_once()
 
@@ -78,6 +82,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_import_link") as mock_link:
             with patch.object(sys, "argv", ["cortex", "import-link", "https://example.com"]):
                 from cortex.cli.main import main
+
                 main()
         mock_link.assert_awaited_once()
 
@@ -89,6 +94,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_import_file") as mock_file:
             with patch.object(sys, "argv", ["cortex", "import-file", "/tmp/doc.pdf"]):
                 from cortex.cli.main import main
+
                 main()
         mock_file.assert_awaited_once()
 
@@ -100,6 +106,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_annotate") as mock_ann:
             with patch.object(sys, "argv", ["cortex", "annotate", "some-event-id", "agree"]):
                 from cortex.cli.main import main
+
                 main()
         mock_ann.assert_awaited_once()
 
@@ -111,6 +118,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_notifications") as mock_notif:
             with patch.object(sys, "argv", ["cortex", "notifications"]):
                 from cortex.cli.main import main
+
                 main()
         mock_notif.assert_awaited_once()
 
@@ -122,6 +130,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_maintain") as mock_maint:
             with patch.object(sys, "argv", ["cortex", "maintain", "classification"]):
                 from cortex.cli.main import main
+
                 main()
         mock_maint.assert_awaited_once()
 
@@ -134,6 +143,7 @@ class TestCommandDispatch:
         with patch("cortex.cli.main._cmd_serve", mock_serve):
             with patch.object(sys, "argv", ["cortex", "serve"]):
                 from cortex.cli.main import main
+
                 main()
         mock_serve.assert_called_once()
 
@@ -145,6 +155,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_sync") as mock_sync:
             with patch.object(sys, "argv", ["cortex", "sync", "--vault", "/tmp/vault"]):
                 from cortex.cli.main import main
+
                 main()
         mock_sync.assert_awaited_once()
 
@@ -153,6 +164,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_thesis") as mock_thesis:
             with patch.object(sys, "argv", ["cortex", "thesis"]):
                 from cortex.cli.main import main
+
                 main()
         mock_thesis.assert_awaited_once()
 
@@ -161,6 +173,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_stats") as mock_stats:
             with patch.object(sys, "argv", ["cortex", "stats"]):
                 from cortex.cli.main import main
+
                 main()
         mock_stats.assert_awaited_once()
 
@@ -169,6 +182,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_stale") as mock_stale:
             with patch.object(sys, "argv", ["cortex", "stale"]):
                 from cortex.cli.main import main
+
                 main()
         mock_stale.assert_awaited_once()
 
@@ -177,6 +191,7 @@ class TestCommandDispatch:
         with self._patch_cmd("_cmd_digest") as mock_digest:
             with patch.object(sys, "argv", ["cortex", "digest"]):
                 from cortex.cli.main import main
+
                 main()
         mock_digest.assert_awaited_once()
 
@@ -184,6 +199,7 @@ class TestCommandDispatch:
 # ---------------------------------------------------------------------------
 # Help output tests
 # ---------------------------------------------------------------------------
+
 
 class TestHelpOutput:
     """_print_help() must mention every documented command."""
@@ -223,6 +239,7 @@ class TestHelpOutput:
         """Passing --help to main() prints help and returns without crashing."""
         with patch.object(sys, "argv", ["cortex", "--help"]):
             from cortex.cli.main import main
+
             main()  # must not raise
 
         out = capsys.readouterr().out
@@ -232,6 +249,7 @@ class TestHelpOutput:
         """-h is also handled by main()."""
         with patch.object(sys, "argv", ["cortex", "-h"]):
             from cortex.cli.main import main
+
             main()
 
         out = capsys.readouterr().out
@@ -241,6 +259,7 @@ class TestHelpOutput:
         """Calling cortex with no arguments prints help text."""
         with patch.object(sys, "argv", ["cortex"]):
             from cortex.cli.main import main
+
             main()
 
         out = capsys.readouterr().out
@@ -250,6 +269,7 @@ class TestHelpOutput:
         """An unknown command prints an error message and exits with code 1."""
         with patch.object(sys, "argv", ["cortex", "does-not-exist"]):
             from cortex.cli.main import main
+
             with pytest.raises(SystemExit) as exc_info:
                 main()
 
@@ -262,6 +282,7 @@ class TestHelpOutput:
 # Import / module-level smoke test
 # ---------------------------------------------------------------------------
 
+
 class TestImports:
     """Verify that key modules can be imported without side effects."""
 
@@ -272,19 +293,23 @@ class TestImports:
     def test_create_app_importable(self):
         """cortex.api.main.create_app can be imported without crashing."""
         from cortex.api.main import create_app  # noqa: F401
+
         assert callable(create_app)
 
     def test_main_function_exists(self):
         """The CLI exposes a callable main() entry point."""
         from cortex.cli.main import main
+
         assert callable(main)
 
     def test_print_help_exists(self):
         """_print_help() is a callable in the module."""
         from cortex.cli.main import _print_help
+
         assert callable(_print_help)
 
     def test_load_config_exists(self):
         """load_config() is importable and callable."""
         from cortex.cli.main import load_config
+
         assert callable(load_config)

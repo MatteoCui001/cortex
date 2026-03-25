@@ -1,4 +1,5 @@
 """Tests for domain entities and enums."""
+
 import uuid
 from datetime import datetime
 
@@ -12,10 +13,10 @@ from cortex.domain.entities import (
     RelationType,
 )
 
-
 # ---------------------------------------------------------------------------
 # EventType enum
 # ---------------------------------------------------------------------------
+
 
 def test_event_type_values():
     assert EventType.ARTICLE == "article"
@@ -38,6 +39,7 @@ def test_event_type_is_str():
 # ---------------------------------------------------------------------------
 # KnowledgeEvent defaults
 # ---------------------------------------------------------------------------
+
 
 def test_knowledge_event_default_id_is_uuid():
     event = KnowledgeEvent()
@@ -111,6 +113,7 @@ def test_knowledge_event_custom_fields():
 # Entity
 # ---------------------------------------------------------------------------
 
+
 def test_entity_default_id_is_uuid():
     entity = Entity()
     uuid.UUID(entity.id)
@@ -135,6 +138,7 @@ def test_entity_aliases_default_empty():
 # ---------------------------------------------------------------------------
 # Relation
 # ---------------------------------------------------------------------------
+
 
 def test_relation_default_id_is_uuid():
     rel = Relation()
@@ -169,6 +173,7 @@ def test_relation_custom_fields():
 # ---------------------------------------------------------------------------
 # Annotation
 # ---------------------------------------------------------------------------
+
 
 def test_annotation_default_id_is_uuid():
     ann = Annotation()

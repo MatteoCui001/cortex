@@ -1,6 +1,7 @@
 """
 REST API routes -- the primary interface for both humans and agents.
 """
+
 from __future__ import annotations
 
 from typing import Optional
@@ -15,17 +16,20 @@ router = APIRouter()
 # Request/Response schemas
 # ------------------------------------------------------------------
 
+
 class SearchRequest(BaseModel):
     query: str
     mode: str = Field("hybrid", pattern="^(semantic|fulltext|hybrid)$")
     limit: int = Field(10, ge=1, le=100)
     type_filter: Optional[str] = None
 
+
 class EventCreate(BaseModel):
     title: str
     content: str
     source: str = "api"
     event_type: str = "note"
+
 
 class EventResponse(BaseModel):
     id: str
@@ -38,10 +42,12 @@ class EventResponse(BaseModel):
     source: str
     created_at: str
 
+
 class SearchResultResponse(BaseModel):
     event: EventResponse
     score: float
     match_type: str
+
 
 class IngestRequest(BaseModel):
     content: Optional[str] = None
@@ -52,9 +58,11 @@ class IngestRequest(BaseModel):
     user_annotation: Optional[str] = None
     workspace_id: str = "default"
 
+
 class AnnotateRequest(BaseModel):
     annotation: str
     stance: Optional[str] = None
+
 
 class AnnotationResponse(BaseModel):
     id: str
@@ -63,6 +71,7 @@ class AnnotationResponse(BaseModel):
     annotation: Optional[str]
     stance: Optional[str]
     created_at: str
+
 
 class NotificationResponse(BaseModel):
     trigger_type: str
@@ -86,6 +95,7 @@ class EntityResponse(BaseModel):
 # ------------------------------------------------------------------
 
 # --- Search (Store -> Human + Agent) ---
+
 
 @router.post("/search", response_model=list[SearchResultResponse])
 async def search(req: SearchRequest, request: Request):
@@ -124,6 +134,7 @@ async def related(event_id: str, request: Request, limit: int = 10):
 
 # --- Entity Search ---
 
+
 @router.get("/entities/search", response_model=list[EntityResponse])
 async def search_entities(
     request: Request,
@@ -134,7 +145,9 @@ async def search_entities(
     """Semantic search over entities."""
     entity_types = [t.strip() for t in types.split(",")] if types else None
     results = await request.app.state.search.search_entities(
-        q, entity_types=entity_types, limit=limit,
+        q,
+        entity_types=entity_types,
+        limit=limit,
     )
     return [
         EntityResponse(
@@ -157,6 +170,7 @@ async def entity_events(entity_id: str, request: Request, limit: int = 50):
 
 
 # --- Events (Agent -> Store write path) ---
+
 
 @router.post("/events", response_model=EventResponse, status_code=201)
 async def create_event(body: EventCreate, request: Request):
@@ -182,6 +196,7 @@ async def get_event(event_id: str, request: Request):
 
 
 # --- Analysis (Store -> Human + Agent) ---
+
 
 @router.get("/thesis")
 async def thesis_coverage(request: Request):
@@ -245,8 +260,8 @@ async def digest(request: Request, days: int = 1):
     return result
 
 
-
 # --- Phase 3: Unified Ingest ---
+
 
 @router.post("/events/ingest", response_model=EventResponse, status_code=201)
 async def ingest_event(body: IngestRequest, request: Request):
@@ -255,6 +270,7 @@ async def ingest_event(body: IngestRequest, request: Request):
 
     if body.url:
         from cortex.use_cases.ingest_link import IngestLinkUseCase
+
         link_uc = IngestLinkUseCase(
             request.app.state.storage,
             request.app.state.embedding,
@@ -265,6 +281,7 @@ async def ingest_event(body: IngestRequest, request: Request):
         event = await link_uc.import_link(body.url, user_annotation=body.user_annotation)
     else:
         from cortex.use_cases.ingest import IngestUseCase
+
         text_uc = IngestUseCase(
             request.app.state.storage,
             request.app.state.embedding,
@@ -286,10 +303,12 @@ async def ingest_event(body: IngestRequest, request: Request):
 
 # --- Phase 3: Annotations ---
 
+
 @router.post("/events/{event_id}/annotate", response_model=AnnotationResponse)
 async def annotate_event(event_id: str, body: AnnotateRequest, request: Request):
     """Add user annotation to an event."""
     import uuid
+
     from cortex.domain.entities import Annotation
     from cortex.domain.stance import parse_user_stance
 
@@ -335,10 +354,12 @@ async def get_annotations(target_type: str, target_id: str, request: Request):
 
 # --- Phase 3: Notifications ---
 
+
 @router.get("/notifications")
 async def get_notifications(request: Request):
     """Get proactive push notifications."""
     from cortex.use_cases.push_detector import PushDetector
+
     workspace = request.app.state.config.get("workspace", "default")
     detector = PushDetector(request.app.state.storage, workspace)
     notifications = await detector.check_all()
@@ -358,6 +379,7 @@ async def get_notifications(request: Request):
 # Helpers
 # ------------------------------------------------------------------
 
+
 def _event_to_response(event) -> EventResponse:
     return EventResponse(
         id=event.id,
@@ -368,5 +390,7 @@ def _event_to_response(event) -> EventResponse:
         thesis_links=event.thesis_links,
         confidence=event.confidence,
         source=event.source,
-        created_at=event.created_at.isoformat() if hasattr(event.created_at, "isoformat") else str(event.created_at),
+        created_at=event.created_at.isoformat()
+        if hasattr(event.created_at, "isoformat")
+        else str(event.created_at),
     )

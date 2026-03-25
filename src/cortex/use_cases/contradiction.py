@@ -2,6 +2,7 @@
 Contradiction and change detection engine.
 Compares new events against existing knowledge to detect signals.
 """
+
 from __future__ import annotations
 
 import json
@@ -9,7 +10,6 @@ from typing import Optional
 
 from cortex.domain.entities import ContradictionResult, KnowledgeEvent
 from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
-
 
 COMPARE_PROMPT = """Compare these two pieces of information and classify their relationship.
 
@@ -29,11 +29,11 @@ Classify as ONE of:
 - bridge: the new info connects two previously unrelated areas
 
 Return ONLY valid JSON:
-{{"signal_type": "...", "topic": "what topic this is about", "summary": "one sentence explanation", "confidence": 0.0-1.0}}"""
+{{"signal_type": "...", "topic": "what topic this is about",
+"summary": "one sentence explanation", "confidence": 0.0-1.0}}"""
 
 
 class ContradictionDetector:
-
     def __init__(
         self,
         storage: StoragePort,
@@ -120,8 +120,7 @@ def _format_key_points(event: KnowledgeEvent) -> str:
     """Format key_points for LLM prompt, falling back to content."""
     if event.key_points:
         return "\n".join(
-            f"- [{kp.get('type', 'claim')}] {kp.get('text', '')}"
-            for kp in event.key_points
+            f"- [{kp.get('type', 'claim')}] {kp.get('text', '')}" for kp in event.key_points
         )
     # Fall back to summary or content
     text = event.summary or event.content[:500]
@@ -131,6 +130,7 @@ def _format_key_points(event: KnowledgeEvent) -> str:
 def _parse_json(text: str) -> dict:
     """Parse JSON from LLM response."""
     import re
+
     try:
         return json.loads(text)
     except json.JSONDecodeError:

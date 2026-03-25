@@ -1,6 +1,7 @@
 """
 Ingestion use case: parse -> extract metadata -> classify -> embed -> store.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -14,14 +15,13 @@ from typing import Optional
 import yaml
 
 from cortex.domain.constants import SOURCE_WEIGHTS
-
-logger = logging.getLogger(__name__)
 from cortex.domain.entities import Entity, EntityType, EventType, KnowledgeEvent, Relation
 from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
 
+logger = logging.getLogger(__name__)
+
 
 class IngestUseCase:
-
     def __init__(
         self,
         storage: StoragePort,
@@ -52,9 +52,7 @@ class IngestUseCase:
         for i, md_file in enumerate(files):
             rel_path = str(md_file.relative_to(vault))
             try:
-                if skip_existing and await self._storage.event_exists(
-                    rel_path, self._workspace_id
-                ):
+                if skip_existing and await self._storage.event_exists(rel_path, self._workspace_id):
                     stats["skipped"] += 1
                     if on_progress:
                         on_progress(i + 1, stats["total"], rel_path, "skipped")
@@ -148,6 +146,7 @@ class IngestUseCase:
                 logger.warning("Stance parsing failed: %s", e)
         elif user_annotation:
             from cortex.domain.stance import parse_user_stance
+
             user_stance = parse_user_stance(user_annotation)
 
         # 4. Map event type
@@ -230,13 +229,13 @@ class IngestUseCase:
 
         return event
 
-
     async def post_ingest_analyze(self, event: KnowledgeEvent) -> list:
         """Run contradiction detection on a newly ingested event. Returns signals."""
         if not self._llm:
             return []
         try:
             from cortex.use_cases.contradiction import ContradictionDetector
+
             detector = ContradictionDetector(self._storage, self._embedding, self._llm)
             results = await detector.analyze(event, workspace_id=self._workspace_id)
             return results
@@ -308,7 +307,7 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
             fm = yaml.safe_load(match.group(1)) or {}
         except yaml.YAMLError:
             fm = {}
-        content = text[match.end():]
+        content = text[match.end() :]
     else:
         fm = {}
         content = text

@@ -1,9 +1,9 @@
 """
 Link ingestion: fetch URL content, extract text, store original, ingest.
 """
+
 from __future__ import annotations
 
-import hashlib
 from typing import Optional
 from urllib.parse import urlparse
 
@@ -14,7 +14,6 @@ from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
 
 
 class IngestLinkUseCase:
-
     def __init__(
         self,
         storage: StoragePort,
@@ -63,9 +62,8 @@ class IngestLinkUseCase:
 
         # 5. Ingest via the standard pipeline
         from cortex.use_cases.ingest import IngestUseCase
-        ingest = IngestUseCase(
-            self._storage, self._embedding, self._llm, self._workspace_id
-        )
+
+        ingest = IngestUseCase(self._storage, self._embedding, self._llm, self._workspace_id)
         event = await ingest.import_text(
             title=title,
             content=text,
@@ -82,6 +80,7 @@ def _extract_text(html: str, url: str) -> tuple[str, str]:
     """Extract readable text and title from HTML."""
     try:
         import trafilatura
+
         result = trafilatura.extract(html, include_comments=False, include_tables=True)
         meta = trafilatura.extract_metadata(html)
         title = meta.title if meta and meta.title else _url_slug(url)
@@ -91,6 +90,7 @@ def _extract_text(html: str, url: str) -> tuple[str, str]:
 
     # Fallback: basic HTML stripping
     import re
+
     title_match = re.search(r"<title[^>]*>(.*?)</title>", html, re.IGNORECASE | re.DOTALL)
     title = title_match.group(1).strip() if title_match else _url_slug(url)
     # Strip tags
