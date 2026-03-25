@@ -1,0 +1,54 @@
+[project]
+name = "cortex"
+version = "0.1.0"
+description = "AI-native knowledge infrastructure for humans and agents"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+    "asyncpg>=0.30.0",
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.34.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.10.0",
+    "httpx>=0.28.1",
+]
+
+[project.optional-dependencies]
+local-embeddings = [
+    "sentence-transformers>=3.0",
+    "torch>=2.5,<2.7",
+]
+document-extraction = [
+    "trafilatura",
+    "pymupdf",
+    "pdfplumber",
+    "python-docx",
+]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.25.0",
+    "httpx>=0.28.0",
+    "ruff>=0.9.0",
+]
+
+[project.scripts]
+cortex = "cortex.cli.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cortex"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
