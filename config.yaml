@@ -46,7 +46,13 @@ api:
   host: 127.0.0.1
   port: 8420
 
-
+notifications:
+  webhook:
+    enabled: false
+    url: ""                   # e.g. http://127.0.0.1:8421/webhook
+    timeout_seconds: 10
+    secret: ""                # HMAC-SHA256 signing secret
+    min_priority: low         # low | medium | high
 
 file_store:
   root: ~/.cortex/store
