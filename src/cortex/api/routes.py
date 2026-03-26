@@ -12,6 +12,30 @@ router = APIRouter()
 
 
 # ------------------------------------------------------------------
+# Health / Readiness
+# ------------------------------------------------------------------
+
+@router.get("/health")
+async def health():
+    """Liveness probe -- always returns 200 if the process is up."""
+    return {"status": "ok"}
+
+
+@router.get("/ready")
+async def ready(request: Request):
+    """Readiness probe -- checks that storage is connected."""
+    storage = getattr(request.app.state, "storage", None)
+    if storage is None:
+        return {"status": "unavailable", "storage": False}
+    try:
+        # Quick connectivity check
+        await storage.get_notifications("__probe__", limit=1)
+        return {"status": "ready", "storage": True}
+    except Exception:
+        return {"status": "degraded", "storage": False}
+
+
+# ------------------------------------------------------------------
 # Request/Response schemas
 # ------------------------------------------------------------------
 
@@ -397,7 +421,11 @@ async def get_notifications(
         from cortex.use_cases.push_detector import PushDetector
         from cortex.use_cases.notification_manager import NotificationManager
         detector = PushDetector(request.app.state.storage, workspace)
-        manager = NotificationManager(request.app.state.storage, detector, workspace_id=workspace)
+        webhook_cfg = request.app.state.config.get("notifications", {}).get("webhook", {})
+        manager = NotificationManager(
+            request.app.state.storage, detector,
+            webhook_cfg=webhook_cfg, workspace_id=workspace,
+        )
         await manager.process()
     results = await request.app.state.storage.get_notifications(
         workspace, status=status, limit=limit,
@@ -435,7 +463,11 @@ async def _transition_notification(request, notification_id, new_status):
     from cortex.use_cases.notification_manager import NotificationManager
     workspace = request.app.state.config.get("workspace", "default")
     detector = PushDetector(request.app.state.storage, workspace)
-    manager = NotificationManager(request.app.state.storage, detector, workspace_id=workspace)
+    webhook_cfg = request.app.state.config.get("notifications", {}).get("webhook", {})
+    manager = NotificationManager(
+        request.app.state.storage, detector,
+        webhook_cfg=webhook_cfg, workspace_id=workspace,
+    )
     try:
         notif = await manager.transition(notification_id, new_status)
     except ValueError as exc:

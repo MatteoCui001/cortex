@@ -399,3 +399,22 @@ class TestNotificationAPI:
     def test_unknown_notification_returns_404(self, client):
         response = client.post("/api/v1/notifications/nonexistent/read")
         assert response.status_code == 404
+
+
+# ------------------------------------------------------------------
+# Phase 5: Health / Ready
+# ------------------------------------------------------------------
+
+class TestHealthReady:
+
+    def test_health_returns_ok(self, client):
+        response = client.get("/api/v1/health")
+        assert response.status_code == 200
+        assert response.json()["status"] == "ok"
+
+    def test_ready_with_storage(self, client):
+        response = client.get("/api/v1/ready")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ready"
+        assert data["storage"] is True
