@@ -487,6 +487,11 @@ async def _transition_notification(request, notification_id, new_status):
         if "not found" in msg:
             raise HTTPException(status_code=404, detail=msg)
         raise HTTPException(status_code=409, detail=msg)
+    except Exception:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Notification {notification_id} not found",
+        )
     return _notification_to_response(notif)
 
 
