@@ -1,11 +1,11 @@
 """
 FastAPI application factory.
 """
-
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
 
+import yaml
 from fastapi import FastAPI
 
 from cortex.adapters.embeddings.local import LocalEmbedding
@@ -20,7 +20,6 @@ from cortex.use_cases.search import SearchUseCase
 
 def load_config() -> dict:
     from cortex.cli.main import load_config as _load
-
     return _load()
 
 
@@ -42,7 +41,6 @@ async def lifespan(app: FastAPI):
     )
 
     import os
-
     api_key = llm_cfg.get("api_key", "") or ""
     if api_key.startswith("${") and api_key.endswith("}"):
         api_key = os.environ.get(api_key[2:-1], "")
@@ -85,5 +83,34 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.state.config = cfg
+
+    # CORS — allow local console dev server
+    from fastapi.middleware.cors import CORSMiddleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     app.include_router(router, prefix="/api/v1")
+
+    # Serve console SPA if built static files exist
+    import pathlib
+    console_dist = pathlib.Path(__file__).resolve().parent.parent.parent.parent / "console" / "dist"
+    if console_dist.is_dir():
+        from fastapi.staticfiles import StaticFiles
+        from fastapi.responses import FileResponse
+
+        # Mount static assets first (more specific route takes priority)
+        app.mount("/console/assets", StaticFiles(directory=str(console_dist / "assets")), name="console-assets")
+
+        @app.get("/console/{path:path}")
+        @app.get("/console")
+        async def console_spa(path: str = ""):
+            file = console_dist / path
+            if file.is_file():
+                return FileResponse(file)
+            return FileResponse(console_dist / "index.html")
+
     return app
