@@ -35,6 +35,12 @@ class StoragePort(ABC):
         """Get a single event by id."""
 
     @abstractmethod
+    async def list_events(
+        self, workspace_id: str = "default", *, limit: int = 50, offset: int = 0, days: int | None = None,
+    ) -> list[KnowledgeEvent]:
+        """List events, newest first. Optional days filter."""
+
+    @abstractmethod
     async def semantic_search(
         self,
         embedding: list[float],

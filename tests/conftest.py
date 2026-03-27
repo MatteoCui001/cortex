@@ -134,6 +134,15 @@ class FakeStorage(StoragePort):
     async def get_all_events_with_tags(self, workspace_id="default") -> list[dict]:
         return []
 
+    async def list_events(self, workspace_id="default", *, limit=50, offset=0, days=None):
+        events = [e for e in self._events.values() if e.workspace_id == workspace_id]
+        if days:
+            from datetime import timedelta
+            cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+            events = [e for e in events if e.created_at and e.created_at >= cutoff]
+        events.sort(key=lambda e: e.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        return events[offset:offset + limit]
+
     async def update_event_tags(self, event_id, tags):
         pass
 

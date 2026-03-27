@@ -60,6 +60,11 @@ class EventResponse(BaseModel):
     thesis_links: list[str]
     confidence: float
     source: str
+    source_path: Optional[str] = None
+    source_type: Optional[str] = None
+    temporality: Optional[str] = None
+    user_annotation: Optional[str] = None
+    raw_input_type: Optional[str] = None
     created_at: str
 
 class SearchResultResponse(BaseModel):
@@ -242,6 +247,21 @@ async def create_event(body: EventCreate, request: Request):
         event_type=body.event_type,
     )
     return _event_to_response(event)
+
+
+@router.get("/events", response_model=list[EventResponse])
+async def list_events(
+    request: Request,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    days: Optional[int] = Query(None, ge=1, le=365),
+):
+    """List recent events, newest first."""
+    workspace = request.app.state.config.get("workspace", "default")
+    events = await request.app.state.storage.list_events(
+        workspace_id=workspace, limit=limit, offset=offset, days=days,
+    )
+    return [_event_to_response(e) for e in events]
 
 
 @router.get("/events/{event_id}", response_model=EventResponse)
@@ -594,5 +614,10 @@ def _event_to_response(event) -> EventResponse:
         thesis_links=event.thesis_links,
         confidence=event.confidence,
         source=event.source,
+        source_path=getattr(event, "source_path", None),
+        source_type=getattr(event, "source_type", None),
+        temporality=getattr(event, "temporality", None),
+        user_annotation=getattr(event, "user_annotation", None),
+        raw_input_type=getattr(event, "raw_input_type", None),
         created_at=event.created_at.isoformat() if hasattr(event.created_at, "isoformat") else str(event.created_at),
     )

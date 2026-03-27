@@ -175,6 +175,23 @@ class PostgresStorage(StoragePort):
         )
         return _row_to_event(row) if row else None
 
+    async def list_events(
+        self, workspace_id: str = "default", *, limit: int = 50, offset: int = 0, days: int | None = None,
+    ) -> list[KnowledgeEvent]:
+        params: list = [workspace_id, limit, offset]
+        day_clause = ""
+        if days is not None:
+            day_clause = "AND created_at >= NOW() - $4 * INTERVAL '1 day'"
+            params.append(days)
+        sql = f"""
+        SELECT * FROM events
+        WHERE workspace_id = $1 {day_clause}
+        ORDER BY created_at DESC
+        LIMIT $2 OFFSET $3
+        """
+        rows = await self._pool.fetch(sql, *params)
+        return [_row_to_event(r) for r in rows]
+
     async def semantic_search(
         self,
         embedding: list[float],
