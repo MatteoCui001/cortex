@@ -457,6 +457,18 @@ async def mark_notification_dismissed(notification_id: str, request: Request):
     return await _transition_notification(request, notification_id, NotificationStatus.DISMISSED)
 
 
+@router.post("/notifications/{notification_id}/deliver",
+             response_model=NotificationDetailResponse)
+async def mark_notification_delivered(notification_id: str, request: Request):
+    """Confirm that a notification was successfully delivered to the user
+    via an external channel (e.g. WeChat iLink push).
+
+    Only valid for notifications in ``pending`` status.
+    """
+    from cortex.domain.entities import NotificationStatus
+    return await _transition_notification(request, notification_id, NotificationStatus.DELIVERED)
+
+
 async def _transition_notification(request, notification_id, new_status):
     """Shared transition logic for notification action endpoints."""
     from cortex.use_cases.push_detector import PushDetector
