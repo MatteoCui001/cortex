@@ -3,28 +3,20 @@ import { api, type Notification } from "../api";
 
 const STATUS_FILTERS = ["all", "pending", "delivered", "read", "acked", "dismissed"] as const;
 
-function PriorityBadge({ priority }: { priority: string }) {
-  const colors: Record<string, string> = {
-    high: "bg-red-500/20 text-red-400 border-red-500/30",
-    medium: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
-    low: "bg-[#2a2e3a] text-[#8b8fa3] border-[#2a2e3a]",
-  };
-  return (
-    <span className={`text-xs px-2 py-0.5 rounded-full border ${colors[priority] ?? colors.low}`}>
-      {priority}
-    </span>
-  );
+function PriorityDot({ priority }: { priority: string }) {
+  const color = priority === "high" ? "var(--status-high)" : priority === "medium" ? "var(--status-medium)" : "var(--text-quaternary)";
+  return <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-[5px]" style={{ background: color }} />;
 }
 
-function StatusBadge({ status }: { status: string }) {
-  const colors: Record<string, string> = {
-    pending: "text-yellow-400",
-    delivered: "text-blue-400",
-    read: "text-green-400",
-    acked: "text-[#8b8fa3]",
-    dismissed: "text-[#555]",
+function StatusLabel({ status }: { status: string }) {
+  const colorMap: Record<string, string> = {
+    pending: "var(--status-medium)",
+    delivered: "var(--type-article)",
+    read: "var(--status-success)",
+    acked: "var(--text-tertiary)",
+    dismissed: "var(--text-quaternary)",
   };
-  return <span className={`text-xs ${colors[status] ?? "text-[#8b8fa3]"}`}>{status}</span>;
+  return <span className="text-[10px] font-medium" style={{ color: colorMap[status] ?? "var(--text-tertiary)" }}>{status}</span>;
 }
 
 export default function Inbox() {
@@ -39,9 +31,7 @@ export default function Inbox() {
       const status = filter === "all" ? undefined : filter;
       const data = await api.notifications(status, 100);
       setNotifications(data);
-    } catch {
-      /* ignore */
-    }
+    } catch { /* ignore */ }
     setLoading(false);
   }, [filter]);
 
@@ -51,38 +41,47 @@ export default function Inbox() {
     setActing(id);
     try {
       const updated = await api.notificationAction(id, action);
-      setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? updated : n))
-      );
-    } catch {
-      /* ignore */
-    }
+      setNotifications((prev) => prev.map((n) => (n.id === id ? updated : n)));
+    } catch { /* ignore */ }
     setActing(null);
   }
 
   return (
     <div>
+      {/* Header */}
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-xl font-semibold text-white">Inbox</h1>
+        <div>
+          <h1 className="text-heading">Inbox</h1>
+          <p className="text-caption mt-1">Notifications from your knowledge system</p>
+        </div>
         <button
           onClick={load}
-          className="text-xs text-[#8b8fa3] hover:text-white bg-[#1a1d27] border border-[#2a2e3a] px-3 py-1.5 rounded-lg transition-colors"
+          className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors"
+          style={{
+            color: "var(--text-secondary)",
+            background: "var(--bg-surface)",
+            border: "1px solid var(--border-default)",
+          }}
         >
           Refresh
         </button>
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 mb-5 bg-[#13151c] p-1 rounded-lg w-fit">
+      <div
+        className="flex gap-0.5 mb-6 p-0.5 rounded-lg w-fit"
+        style={{ background: "var(--bg-surface)" }}
+      >
         {STATUS_FILTERS.map((s) => (
           <button
             key={s}
             onClick={() => setFilter(s)}
-            className={`text-xs px-3 py-1.5 rounded-md transition-colors ${
-              filter === s
-                ? "bg-[#2a2e3a] text-white"
-                : "text-[#8b8fa3] hover:text-white"
-            }`}
+            className="text-[11px] px-2.5 py-1 rounded-md transition-all duration-150"
+            style={{
+              background: filter === s ? "var(--bg-elevated)" : "transparent",
+              color: filter === s ? "var(--text-primary)" : "var(--text-tertiary)",
+              fontWeight: filter === s ? 500 : 400,
+            }}
           >
             {s}
           </button>
@@ -90,56 +89,82 @@ export default function Inbox() {
       </div>
 
       {loading ? (
-        <p className="text-[#8b8fa3] text-sm">Loading...</p>
+        <div className="py-16 text-center text-body">Loading...</div>
       ) : notifications.length === 0 ? (
-        <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-8 text-center">
-          <p className="text-[#8b8fa3]">No notifications</p>
+        <div
+          className="rounded-xl p-12 text-center"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
+        >
+          <div className="text-body">No notifications</div>
+          <div className="text-meta mt-1">
+            {filter === "all"
+              ? "Your inbox is empty. Notifications appear when signals are detected."
+              : `No ${filter} notifications.`}
+          </div>
         </div>
       ) : (
         <div className="space-y-2">
           {notifications.map((n) => (
             <div
               key={n.id}
-              className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-4 hover:border-[#3a3e4a] transition-colors"
+              className="rounded-xl px-5 py-4 transition-all duration-150"
+              style={{
+                background: "var(--bg-surface)",
+                border: "1px solid var(--border-subtle)",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--border-default)")}
+              onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
             >
               <div className="flex items-start gap-3">
+                <PriorityDot priority={n.priority} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1">
-                    <PriorityBadge priority={n.priority} />
-                    <StatusBadge status={n.status} />
-                    <span className="text-[#555] text-xs font-mono">{n.id.slice(0, 7)}</span>
+                    <StatusLabel status={n.status} />
+                    <span className="text-meta font-mono">{n.id.slice(0, 7)}</span>
                   </div>
-                  <div className="text-white text-sm font-medium mb-1">{n.title}</div>
+                  <div className="text-[13px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
+                    {n.title}
+                  </div>
                   {n.body && (
-                    <div className="text-[#8b8fa3] text-xs line-clamp-2">{n.body}</div>
+                    <div className="text-[12px] line-clamp-2" style={{ color: "var(--text-tertiary)" }}>
+                      {n.body}
+                    </div>
                   )}
-                  <div className="text-[#555] text-xs mt-2">
+                  <div className="text-meta mt-2">
                     {new Date(n.created_at).toLocaleString()}
                     {n.source_kind && <span className="ml-2">{n.source_kind}</span>}
                   </div>
                 </div>
 
-                {/* Actions — only for actionable states */}
+                {/* Actions */}
                 {(n.status === "pending" || n.status === "delivered") && (
                   <div className="flex gap-1.5 shrink-0">
-                    <ActionBtn
-                      label="Read"
-                      onClick={() => handleAction(n.id, "read")}
-                      disabled={acting === n.id}
-                      color="blue"
-                    />
-                    <ActionBtn
-                      label="Ack"
-                      onClick={() => handleAction(n.id, "ack")}
-                      disabled={acting === n.id}
-                      color="green"
-                    />
-                    <ActionBtn
-                      label="Dismiss"
-                      onClick={() => handleAction(n.id, "dismiss")}
-                      disabled={acting === n.id}
-                      color="gray"
-                    />
+                    {(["Read", "Ack", "Dismiss"] as const).map((label) => {
+                      const action = label.toLowerCase() as "read" | "ack" | "dismiss";
+                      return (
+                        <button
+                          key={label}
+                          onClick={() => handleAction(n.id, action)}
+                          disabled={acting === n.id}
+                          className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors disabled:opacity-30"
+                          style={{
+                            color: "var(--text-secondary)",
+                            border: "1px solid var(--border-default)",
+                            background: "transparent",
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.background = "var(--bg-elevated)";
+                            e.currentTarget.style.color = "var(--text-primary)";
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.background = "transparent";
+                            e.currentTarget.style.color = "var(--text-secondary)";
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -148,32 +173,5 @@ export default function Inbox() {
         </div>
       )}
     </div>
-  );
-}
-
-function ActionBtn({
-  label,
-  onClick,
-  disabled,
-  color,
-}: {
-  label: string;
-  onClick: () => void;
-  disabled: boolean;
-  color: "blue" | "green" | "gray";
-}) {
-  const colors = {
-    blue: "text-blue-400 hover:bg-blue-500/20",
-    green: "text-green-400 hover:bg-green-500/20",
-    gray: "text-[#8b8fa3] hover:bg-[#2a2e3a]",
-  };
-  return (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      className={`text-xs px-2.5 py-1 rounded-md border border-[#2a2e3a] transition-colors disabled:opacity-40 ${colors[color]}`}
-    >
-      {label}
-    </button>
   );
 }

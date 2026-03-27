@@ -2,25 +2,61 @@ import { useEffect, useState } from "react";
 import { api, type Stats, type Notification, type Signal, type Event } from "../api";
 import { useNavigate } from "react-router-dom";
 
-function StatCard({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
+/* ── Shared small components ── */
+
+function Metric({ label, value, sub }: { label: string; value: string | number; sub?: string }) {
   return (
-    <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-5">
-      <div className="text-[#8b8fa3] text-xs uppercase tracking-wider mb-1">{label}</div>
-      <div className="text-2xl font-semibold text-white">{value}</div>
-      {sub && <div className="text-[#555] text-xs mt-1">{sub}</div>}
+    <div>
+      <div className="text-subheading mb-1">{label}</div>
+      <div className="text-2xl font-semibold" style={{ color: "var(--text-primary)", letterSpacing: "-0.02em" }}>
+        {value}
+      </div>
+      {sub && <div className="text-meta mt-0.5">{sub}</div>}
     </div>
   );
 }
 
-function PriorityBadge({ priority }: { priority: string }) {
-  const colors: Record<string, string> = {
-    high: "bg-red-500/20 text-red-400",
-    medium: "bg-yellow-500/20 text-yellow-400",
-    low: "bg-[#2a2e3a] text-[#8b8fa3]",
-  };
+function SectionHeader({ title, action, onAction }: { title: string; action?: string; onAction?: () => void }) {
   return (
-    <span className={`text-xs px-2 py-0.5 rounded-full ${colors[priority] ?? colors.low}`}>
-      {priority}
+    <div className="flex items-baseline justify-between mb-4">
+      <h2 className="text-subheading">{title}</h2>
+      {action && (
+        <button
+          onClick={onAction}
+          className="text-[11px] font-medium transition-colors"
+          style={{ color: "var(--text-accent-dim)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-accent)")}
+          onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-accent-dim)")}
+        >
+          {action}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function PriorityDot({ priority }: { priority: string }) {
+  const color = priority === "high" ? "var(--status-high)" : priority === "medium" ? "var(--status-medium)" : "var(--text-quaternary)";
+  return <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-[5px]" style={{ background: color }} />;
+}
+
+function TypeLabel({ type }: { type: string }) {
+  const map: Record<string, { color: string; bg: string }> = {
+    article: { color: "var(--type-article)", bg: "var(--type-article-bg)" },
+    note: { color: "var(--type-note)", bg: "var(--type-note-bg)" },
+    chat: { color: "var(--type-chat)", bg: "var(--type-chat-bg)" },
+    meeting: { color: "var(--type-meeting)", bg: "var(--type-meeting-bg)" },
+    thesis: { color: "var(--type-thesis)", bg: "var(--type-thesis-bg)" },
+    voice_memo: { color: "var(--type-voice)", bg: "var(--type-voice-bg)" },
+    document: { color: "var(--type-document)", bg: "var(--type-document-bg)" },
+  };
+  const s = map[type] ?? { color: "var(--text-tertiary)", bg: "var(--bg-elevated)" };
+  return (
+    <span
+      className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+      style={{ color: s.color, background: s.bg }}
+    >
+      {type}
     </span>
   );
 }
@@ -30,34 +66,37 @@ function TypeBar({ distribution }: { distribution: Record<string, number> }) {
   const total = entries.reduce((s, [, c]) => s + c, 0);
   if (total === 0) return null;
 
-  const colors = [
-    "bg-blue-500", "bg-green-500", "bg-yellow-500", "bg-purple-500",
-    "bg-pink-500", "bg-orange-500", "bg-teal-500", "bg-red-500",
-  ];
+  const colorMap: Record<string, string> = {
+    article: "var(--type-article)", note: "var(--type-note)", chat: "var(--type-chat)",
+    meeting: "var(--type-meeting)", thesis: "var(--type-thesis)", voice_memo: "var(--type-voice)",
+    document: "var(--type-document)",
+  };
 
   return (
     <div>
-      <div className="flex rounded-full overflow-hidden h-2 mb-3">
-        {entries.map(([type, count], i) => (
+      <div className="flex rounded-full overflow-hidden h-1 mb-3" style={{ background: "var(--bg-active)" }}>
+        {entries.map(([type, count]) => (
           <div
             key={type}
-            className={`${colors[i % colors.length]} opacity-70`}
-            style={{ width: `${(count / total) * 100}%` }}
+            className="opacity-80"
+            style={{ width: `${(count / total) * 100}%`, background: colorMap[type] ?? "var(--text-quaternary)" }}
           />
         ))}
       </div>
       <div className="flex flex-wrap gap-x-4 gap-y-1">
-        {entries.map(([type, count], i) => (
-          <div key={type} className="flex items-center gap-1.5 text-xs">
-            <div className={`w-2 h-2 rounded-full ${colors[i % colors.length]} opacity-70`} />
-            <span className="text-[#8b8fa3]">{type}</span>
-            <span className="text-white font-medium">{count}</span>
+        {entries.map(([type, count]) => (
+          <div key={type} className="flex items-center gap-1.5">
+            <span className="w-1.5 h-1.5 rounded-full opacity-80" style={{ background: colorMap[type] ?? "var(--text-quaternary)" }} />
+            <span className="text-meta">{type}</span>
+            <span className="text-[11px] font-medium" style={{ color: "var(--text-secondary)" }}>{count}</span>
           </div>
         ))}
       </div>
     </div>
   );
 }
+
+/* ── Main page ── */
 
 export default function Overview() {
   const [stats, setStats] = useState<Stats | null>(null);
@@ -83,79 +122,99 @@ export default function Overview() {
     });
   }, []);
 
-  const pendingCount = notifications.filter(n => n.status === "pending").length;
+  const activeNotifs = notifications.filter(n => n.status === "pending" || n.status === "delivered");
   const deliveredCount = notifications.filter(n => n.status === "delivered").length;
 
-  if (loading) return <p className="text-[#8b8fa3] text-sm p-4">Loading...</p>;
+  if (loading) {
+    return (
+      <div className="py-16 text-center">
+        <div className="text-body">Loading...</div>
+      </div>
+    );
+  }
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-white mb-6">Overview</h1>
+      {/* Page header */}
+      <div className="mb-8">
+        <h1 className="text-heading">Overview</h1>
+        <p className="text-caption mt-1">What your knowledge system has been doing</p>
+      </div>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <StatCard label="Total Events" value={stats?.events ?? 0} />
-        <StatCard label="Entities" value={stats?.entities ?? 0} />
-        <StatCard
+      {/* Metrics strip */}
+      <div
+        className="grid grid-cols-4 gap-8 p-5 rounded-xl mb-8"
+        style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
+      >
+        <Metric label="Events" value={stats?.events ?? 0} />
+        <Metric label="Entities" value={stats?.entities ?? 0} />
+        <Metric
           label="Pending"
-          value={pendingCount}
+          value={activeNotifs.filter(n => n.status === "pending").length}
           sub={deliveredCount > 0 ? `${deliveredCount} delivered` : undefined}
         />
-        <StatCard label="Signals" value={signals.length} sub="last 50" />
+        <Metric label="Signals" value={signals.length} />
       </div>
 
       {/* Type distribution */}
       {stats?.type_distribution && Object.keys(stats.type_distribution).length > 0 && (
-        <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-5 mb-8">
-          <h2 className="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider mb-3">Knowledge Distribution</h2>
+        <div
+          className="p-5 rounded-xl mb-8"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
+        >
+          <SectionHeader title="Knowledge Distribution" />
           <TypeBar distribution={stats.type_distribution} />
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      {/* Two-column: Notifications + Recent Ingests */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
         {/* Active notifications */}
-        <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Active Notifications</h2>
-            <button onClick={() => navigate("/inbox")} className="text-xs text-indigo-400/70 hover:text-indigo-400">
-              View all
-            </button>
-          </div>
-          {notifications.filter(n => n.status === "pending" || n.status === "delivered").length === 0 ? (
-            <p className="text-[#555] text-sm py-4 text-center">All clear</p>
+        <div
+          className="p-5 rounded-xl"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
+        >
+          <SectionHeader title="Active Notifications" action="View all" onAction={() => navigate("/inbox")} />
+          {activeNotifs.length === 0 ? (
+            <div className="py-6 text-center">
+              <div className="text-caption">All clear</div>
+              <div className="text-meta mt-1">No pending notifications</div>
+            </div>
           ) : (
-            <div className="space-y-2">
-              {notifications
-                .filter(n => n.status === "pending" || n.status === "delivered")
-                .slice(0, 6)
-                .map((n) => (
-                  <div key={n.id} className="flex items-center gap-3 text-sm py-1.5">
-                    <PriorityBadge priority={n.priority} />
-                    <span className="text-white flex-1 truncate">{n.title}</span>
-                    <span className="text-[#555] text-xs">{n.status}</span>
+            <div className="space-y-1">
+              {activeNotifs.slice(0, 6).map((n) => (
+                <div key={n.id} className="flex items-start gap-2.5 py-2 px-1 rounded-lg" style={{ transition: "background 120ms" }}>
+                  <PriorityDot priority={n.priority} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-medium truncate" style={{ color: "var(--text-primary)" }}>{n.title}</div>
+                    <div className="text-meta">{n.status}</div>
                   </div>
-                ))}
+                </div>
+              ))}
             </div>
           )}
         </div>
 
         {/* Recent events */}
-        <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Recent Ingests (7d)</h2>
-            <button onClick={() => navigate("/events")} className="text-xs text-indigo-400/70 hover:text-indigo-400">
-              View all
-            </button>
-          </div>
+        <div
+          className="p-5 rounded-xl"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
+        >
+          <SectionHeader title="Recent Ingests (7d)" action="View all" onAction={() => navigate("/events")} />
           {recentEvents.length === 0 ? (
-            <p className="text-[#555] text-sm py-4 text-center">No recent ingests</p>
+            <div className="py-6 text-center">
+              <div className="text-caption">No recent ingests</div>
+              <div className="text-meta mt-1">Send content via WeChat to get started</div>
+            </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-1">
               {recentEvents.slice(0, 8).map((e) => (
-                <div key={e.id} className="flex items-start gap-3 text-sm py-1.5">
-                  <span className="text-indigo-400 text-xs bg-indigo-500/10 px-2 py-0.5 rounded shrink-0">{e.type}</span>
-                  <span className="text-white flex-1 truncate">{e.title}</span>
-                  <span className="text-[#555] text-xs shrink-0">{new Date(e.created_at).toLocaleDateString()}</span>
+                <div key={e.id} className="flex items-start gap-2.5 py-2 px-1">
+                  <TypeLabel type={e.type} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] truncate" style={{ color: "var(--text-primary)" }}>{e.title || "—"}</div>
+                  </div>
+                  <span className="text-meta shrink-0">{new Date(e.created_at).toLocaleDateString()}</span>
                 </div>
               ))}
             </div>
@@ -163,23 +222,27 @@ export default function Overview() {
         </div>
       </div>
 
-      {/* Recent signals */}
+      {/* Signals preview */}
       {signals.length > 0 && (
-        <div className="bg-[#1a1d27] border border-[#2a2e3a] rounded-xl p-5 mt-6">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-medium text-[#8b8fa3] uppercase tracking-wider">Recent Signals</h2>
-            <button onClick={() => navigate("/signals")} className="text-xs text-indigo-400/70 hover:text-indigo-400">
-              View all
-            </button>
-          </div>
+        <div
+          className="p-5 rounded-xl"
+          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
+        >
+          <SectionHeader title="Recent Signals" action="View all" onAction={() => navigate("/signals")} />
           <div className="space-y-2">
             {signals.slice(0, 5).map((s) => (
-              <div key={s.id} className="flex items-center gap-3 text-sm py-1.5">
-                <span className="text-xs px-2 py-0.5 rounded-full bg-purple-500/20 text-purple-400">
+              <div key={s.id} className="flex items-start gap-3 py-2 px-1">
+                <span
+                  className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 mt-px"
+                  style={{ color: "var(--type-thesis)", background: "var(--type-thesis-bg)" }}
+                >
                   {s.signal_type}
                 </span>
-                <span className="text-white flex-1 truncate">{s.topic || s.summary || "—"}</span>
-                <span className="text-[#555] text-xs">{s.priority_score.toFixed(2)}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13px]" style={{ color: "var(--text-primary)" }}>{s.topic || s.summary || "—"}</div>
+                  {s.rationale && <div className="text-meta mt-0.5 line-clamp-1">{s.rationale}</div>}
+                </div>
+                <span className="text-meta shrink-0">{s.priority_score.toFixed(2)}</span>
               </div>
             ))}
           </div>
