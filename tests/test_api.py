@@ -387,6 +387,40 @@ class TestNotificationAPI:
         assert response.status_code == 200
         assert response.json()["status"] == "dismissed"
 
+    def test_mark_notification_delivered(self, client, fake_storage):
+        from cortex.domain.entities import Notification
+        import asyncio
+        n = Notification(title="T", body="B", source_kind="signal")
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.post(f"/api/v1/notifications/{n.id}/deliver")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "delivered"
+        assert data["delivered_at"] is not None
+        assert data.get("acted_at") is None
+
+    def test_deliver_already_delivered_returns_409(self, client, fake_storage):
+        from cortex.domain.entities import Notification, NotificationStatus
+        import asyncio
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.DELIVERED)
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.post(f"/api/v1/notifications/{n.id}/deliver")
+        assert response.status_code == 409
+
+    def test_deliver_acked_returns_409(self, client, fake_storage):
+        from cortex.domain.entities import Notification, NotificationStatus
+        import asyncio
+        n = Notification(title="T", body="B", source_kind="signal",
+                         status=NotificationStatus.ACKED)
+        asyncio.run(fake_storage.insert_notification(n))
+        response = client.post(f"/api/v1/notifications/{n.id}/deliver")
+        assert response.status_code == 409
+
+    def test_deliver_nonexistent_returns_404(self, client):
+        response = client.post("/api/v1/notifications/nonexistent/deliver")
+        assert response.status_code == 404
+
     def test_invalid_transition_returns_409(self, client, fake_storage):
         from cortex.domain.entities import Notification, NotificationStatus
         import asyncio
