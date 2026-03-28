@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { api, type Signal } from "../api";
+import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
 
 const VERDICTS = ["useful", "not_useful", "wrong", "save_for_later"] as const;
-
 const VERDICT_LABELS: Record<string, string> = {
   useful: "Useful",
   not_useful: "Not useful",
@@ -28,6 +28,7 @@ export default function Signals() {
   const [loading, setLoading] = useState(true);
   const [feedbackFor, setFeedbackFor] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
 
   useEffect(() => {
     api.signals(100).then(setSignals).finally(() => setLoading(false));
@@ -44,7 +45,6 @@ export default function Signals() {
 
   return (
     <div>
-      {/* Header */}
       <div className="mb-6">
         <h1 className="text-heading">Signals</h1>
         <p className="text-caption mt-1">Connections and patterns detected across your knowledge</p>
@@ -53,7 +53,6 @@ export default function Signals() {
       {loading ? (
         <div className="py-16 text-center text-body">Loading...</div>
       ) : signals.length === 0 ? (
-        /* ── Rich empty state ── */
         <div
           className="rounded-xl p-12"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
@@ -87,7 +86,6 @@ export default function Signals() {
           </div>
         </div>
       ) : (
-        /* ── Signal list ── */
         <div className="space-y-2">
           {signals.map((s) => (
             <div
@@ -102,7 +100,6 @@ export default function Signals() {
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
-                  {/* Meta row */}
                   <div className="flex items-center gap-2 mb-2">
                     <span
                       className="text-[10px] font-medium px-1.5 py-0.5 rounded"
@@ -111,27 +108,21 @@ export default function Signals() {
                       {s.signal_type}
                     </span>
                     <PriorityBar score={s.priority_score} />
-                    {s.evidence_strength && (
-                      <span className="text-meta">{s.evidence_strength}</span>
-                    )}
+                    {s.evidence_strength && <span className="text-meta">{s.evidence_strength}</span>}
                   </div>
 
-                  {/* Topic + summary */}
                   {s.topic && (
                     <div className="text-[14px] font-medium mb-1" style={{ color: "var(--text-primary)" }}>
                       {s.topic}
                     </div>
                   )}
-                  {s.summary && (
-                    <div className="text-body mb-2">{s.summary}</div>
-                  )}
+                  {s.summary && <div className="text-body mb-2">{s.summary}</div>}
                   {s.rationale && (
                     <div className="text-[12px] italic mb-2" style={{ color: "var(--text-quaternary)" }}>
                       {s.rationale}
                     </div>
                   )}
 
-                  {/* Thesis links */}
                   {s.thesis_links.length > 0 && (
                     <div className="flex gap-1.5 flex-wrap mb-2">
                       {s.thesis_links.map((t) => (
@@ -142,63 +133,59 @@ export default function Signals() {
                     </div>
                   )}
 
-                  {/* Footer */}
                   <div className="text-meta">
                     {new Date(s.created_at).toLocaleString()}
                     <span className="ml-2 font-mono">{s.id.slice(0, 7)}</span>
+                    {s.evidence_event_ids.length > 0 && (
+                      <span className="ml-2">{s.evidence_event_ids.length} evidence event{s.evidence_event_ids.length > 1 ? "s" : ""}</span>
+                    )}
                   </div>
                 </div>
 
-                {/* Feedback */}
-                <div className="shrink-0">
+                {/* Actions column */}
+                <div className="shrink-0 flex flex-col gap-1.5">
+                  {/* Context button */}
+                  <button
+                    onClick={() => setDrawer({
+                      kind: "signal",
+                      id: s.id,
+                      evidence_event_ids: s.evidence_event_ids,
+                      new_event_id: s.new_event_id,
+                      existing_event_id: s.existing_event_id,
+                    })}
+                    className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
+                    style={{ color: "var(--text-accent-dim)", border: "1px solid var(--border-accent)" }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(129,140,248,0.08)"; e.currentTarget.style.color = "var(--text-accent)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-accent-dim)"; }}
+                  >
+                    Context
+                  </button>
+
+                  {/* Feedback */}
                   {feedbackFor === s.id ? (
-                    <div className="flex flex-col gap-1">
+                    <>
                       {VERDICTS.map((v) => (
                         <button
                           key={v}
                           onClick={() => submitFeedback(s.id, v)}
                           disabled={submitting}
-                          className="text-[11px] px-3 py-1 rounded-md transition-colors disabled:opacity-30 text-left"
-                          style={{
-                            color: "var(--text-secondary)",
-                            border: "1px solid var(--border-default)",
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.background = "var(--bg-elevated)";
-                            e.currentTarget.style.color = "var(--text-primary)";
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.background = "transparent";
-                            e.currentTarget.style.color = "var(--text-secondary)";
-                          }}
+                          className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 text-left"
+                          style={{ color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
+                          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
                         >
                           {VERDICT_LABELS[v]}
                         </button>
                       ))}
-                      <button
-                        onClick={() => setFeedbackFor(null)}
-                        className="text-[10px] mt-1 text-center transition-colors"
-                        style={{ color: "var(--text-quaternary)" }}
-                      >
-                        cancel
-                      </button>
-                    </div>
+                      <button onClick={() => setFeedbackFor(null)} className="text-[10px] text-center" style={{ color: "var(--text-quaternary)" }}>cancel</button>
+                    </>
                   ) : (
                     <button
                       onClick={() => setFeedbackFor(s.id)}
-                      className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors"
-                      style={{
-                        color: "var(--text-secondary)",
-                        border: "1px solid var(--border-default)",
-                      }}
-                      onMouseEnter={(e) => {
-                        e.currentTarget.style.background = "var(--bg-elevated)";
-                        e.currentTarget.style.color = "var(--text-primary)";
-                      }}
-                      onMouseLeave={(e) => {
-                        e.currentTarget.style.background = "transparent";
-                        e.currentTarget.style.color = "var(--text-secondary)";
-                      }}
+                      className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
+                      style={{ color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
+                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; e.currentTarget.style.color = "var(--text-primary)"; }}
+                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
                     >
                       Feedback
                     </button>
@@ -209,6 +196,8 @@ export default function Signals() {
           ))}
         </div>
       )}
+
+      <DetailDrawer target={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }

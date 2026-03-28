@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type Event } from "../api";
+import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
 
 const DAY_FILTERS = [
   { label: "7d", days: 7 },
@@ -27,10 +28,7 @@ function TypeLabel({ type }: { type: string }) {
 
 function MetaBadge({ children }: { children: string }) {
   return (
-    <span
-      className="text-[10px] px-1.5 py-0.5 rounded"
-      style={{ color: "var(--text-tertiary)", background: "var(--bg-elevated)" }}
-    >
+    <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: "var(--text-tertiary)", background: "var(--bg-elevated)" }}>
       {children}
     </span>
   );
@@ -76,6 +74,7 @@ export default function Events() {
   const [loading, setLoading] = useState(true);
   const [days, setDays] = useState<number | undefined>(30);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
 
   useEffect(() => {
     setLoading(true);
@@ -92,10 +91,7 @@ export default function Events() {
         </div>
         <div className="flex items-center gap-3">
           <span className="text-meta">{events.length} events</span>
-          <div
-            className="flex gap-0.5 p-0.5 rounded-lg"
-            style={{ background: "var(--bg-surface)" }}
-          >
+          <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-surface)" }}>
             {DAY_FILTERS.map((f) => (
               <button
                 key={f.label}
@@ -139,15 +135,14 @@ export default function Events() {
               <button
                 onClick={() => setExpanded(expanded === e.id ? null : e.id)}
                 className="w-full text-left px-4 py-3 rounded-xl transition-colors"
-                style={{ background: expanded !== e.id ? "transparent" : undefined }}
-                onMouseEnter={(e) => { if (!e.currentTarget.parentElement?.style.borderColor?.includes("default")) e.currentTarget.style.background = "var(--bg-surface)"; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = ""; }}
+                onMouseEnter={(ev) => { if (expanded !== e.id) ev.currentTarget.style.background = "var(--bg-surface)"; }}
+                onMouseLeave={(ev) => { if (expanded !== e.id) ev.currentTarget.style.background = ""; }}
               >
                 <div className="flex items-start gap-3">
                   <TypeLabel type={e.type} />
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium" style={{ color: e.title ? "var(--text-primary)" : "var(--text-tertiary)" }}>
-                      {e.title || "—"}
+                      {e.title || "\u2014"}
                     </div>
                     <div className="flex items-center gap-2 mt-1 flex-wrap">
                       <span className="text-meta">{new Date(e.created_at).toLocaleString()}</span>
@@ -162,16 +157,14 @@ export default function Events() {
                       </div>
                     )}
                   </div>
-                  <span className="text-meta shrink-0 mt-0.5">{expanded === e.id ? "▼" : "▶"}</span>
+                  <span className="text-meta shrink-0 mt-0.5">{expanded === e.id ? "\u25BC" : "\u25B6"}</span>
                 </div>
               </button>
 
               {/* Expanded detail */}
               {expanded === e.id && (
                 <div className="px-4 pb-4 pt-2 ml-12 space-y-3 border-t" style={{ borderColor: "var(--border-subtle)" }}>
-                  {e.summary && (
-                    <p className="text-body leading-relaxed">{e.summary}</p>
-                  )}
+                  {e.summary && <p className="text-body leading-relaxed">{e.summary}</p>}
 
                   {e.user_annotation && (
                     <div className="px-3 py-2 rounded-lg" style={{ background: "rgba(165,180,252,0.04)", borderLeft: "2px solid var(--text-accent-dim)" }}>
@@ -200,6 +193,15 @@ export default function Events() {
                     <span className="text-meta font-mono">{e.id.slice(0, 8)}</span>
                     {e.confidence > 0 && <span className="text-meta">conf {e.confidence.toFixed(2)}</span>}
                     <SourceLink path={e.source_path} />
+                    <button
+                      onClick={(ev) => { ev.stopPropagation(); setDrawer({ kind: "event", id: e.id }); }}
+                      className="ml-auto text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
+                      style={{ color: "var(--text-accent-dim)", border: "1px solid var(--border-accent)" }}
+                      onMouseEnter={(ev) => { ev.currentTarget.style.background = "rgba(129,140,248,0.08)"; ev.currentTarget.style.color = "var(--text-accent)"; }}
+                      onMouseLeave={(ev) => { ev.currentTarget.style.background = "transparent"; ev.currentTarget.style.color = "var(--text-accent-dim)"; }}
+                    >
+                      Context
+                    </button>
                   </div>
                 </div>
               )}
@@ -207,6 +209,8 @@ export default function Events() {
           ))}
         </div>
       )}
+
+      <DetailDrawer target={drawer} onClose={() => setDrawer(null)} />
     </div>
   );
 }
