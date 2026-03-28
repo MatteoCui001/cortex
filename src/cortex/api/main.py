@@ -96,9 +96,14 @@ def create_app() -> FastAPI:
     app.include_router(router, prefix="/api/v1")
 
     # Serve console SPA if built static files exist
-    import pathlib
-    console_dist = pathlib.Path(__file__).resolve().parent.parent.parent.parent / "console" / "dist"
-    if console_dist.is_dir():
+    import pathlib, os
+    # Try multiple locations: CWD first (works with `uv run`), then relative to source
+    _candidates = [
+        pathlib.Path(os.getcwd()) / "console" / "dist",
+        pathlib.Path(__file__).resolve().parent.parent.parent.parent / "console" / "dist",
+    ]
+    console_dist = next((p for p in _candidates if p.is_dir()), None)
+    if console_dist:
         from fastapi.staticfiles import StaticFiles
         from fastapi.responses import FileResponse
 
