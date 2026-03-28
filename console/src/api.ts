@@ -73,6 +73,24 @@ export interface Stats {
   type_distribution: Record<string, number>;
 }
 
+export interface SearchResult {
+  event: Event;
+  score: number;
+  match_type: string;
+}
+
+export interface RelationRow {
+  id: string;
+  source_type: string;
+  source_id: string;
+  source_name: string;
+  target_type: string;
+  target_id: string;
+  target_name: string;
+  relation: string;
+  confidence: number;
+}
+
 // API functions
 export const api = {
   health: () => get<{ status: string }>("/health"),
@@ -80,6 +98,10 @@ export const api = {
   events: (limit = 50, days?: number) =>
     get<Event[]>(`/events?limit=${limit}${days ? `&days=${days}` : ""}`),
   event: (id: string) => get<Event>(`/events/${id}`),
+  eventRelated: (id: string, limit = 10) =>
+    get<SearchResult[]>(`/search/related/${id}?limit=${limit}`),
+  entityGraph: (objectId: string) =>
+    get<RelationRow[]>(`/entity/${objectId}/graph`),
   notifications: (status?: string, limit = 50) =>
     get<Notification[]>(
       `/notifications?limit=${limit}${status ? `&status=${status}` : ""}`
