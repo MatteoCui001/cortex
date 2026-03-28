@@ -374,6 +374,29 @@ async def ingest_event(body: IngestRequest, request: Request):
 
     if not event:
         raise HTTPException(status_code=400, detail="Could not ingest content")
+
+    # Run signal detection asynchronously (best-effort, don't block response)
+    import asyncio
+    async def _background_analyze():
+        try:
+            from cortex.use_cases.ingest import IngestUseCase as _IUC
+            ingest_uc = _IUC(
+                request.app.state.storage,
+                request.app.state.embedding,
+                request.app.state.llm,
+                workspace,
+            )
+            signals = await ingest_uc.post_ingest_analyze(event)
+            if signals:
+                from cortex.use_cases.notification_manager import NotificationManager
+                nm = NotificationManager(request.app.state.storage)
+                await nm.process(signals)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning("post_ingest_analyze failed: %s", exc)
+
+    asyncio.create_task(_background_analyze())
+
     return _event_to_response(event)
 
 
