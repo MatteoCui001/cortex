@@ -46,6 +46,7 @@ class PushDetector:
                 summary=s.summary or "",
                 event_ids=s.evidence_event_ids or [s.existing_event_id],
                 rationale=s.rationale,
+                signal_id=s.id,
             )
             notifications.append(notif)
         return notifications
@@ -96,6 +97,7 @@ class PushDetector:
         summary: str,
         event_ids: list[str],
         rationale: str | None = None,
+        signal_id: str | None = None,
     ) -> PushNotification:
         """Create a notification from a contradiction detection result."""
         type_titles = {
@@ -114,6 +116,7 @@ class PushDetector:
             ),
             body=body,
             related_event_ids=event_ids,
+            signal_id=signal_id,
             priority="high" if signal_type == "contradiction" else "medium",
             workspace_id=self._workspace_id,
         )

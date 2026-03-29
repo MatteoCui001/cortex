@@ -30,36 +30,14 @@ from cortex.domain.entities import (
 from cortex.use_cases.contradiction import (
     _dedup_signals,
     _filter_candidates,
-    _score_signals,
 )
+from cortex.use_cases.value_scorer import score_signals as _score_signals
 from cortex.use_cases.contradiction import ContradictionDetector
+from cortex.use_cases.ingest import IngestUseCase
 from cortex.use_cases.ingest_file import IngestFileUseCase
 from cortex.use_cases.ingest_link import IngestLinkUseCase
 from cortex.use_cases.push_detector import PushDetector
-from tests.conftest import FakeEmbedding, FakeLLM, FakeStorage
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-def _make_event(**kwargs) -> KnowledgeEvent:
-    defaults = dict(
-        id=str(uuid.uuid4()),
-        workspace_id="default",
-        type=EventType.NOTE,
-        title="Some Title",
-        content="Some content text",
-        summary="Some summary",
-        tags=[],
-        thesis_links=[],
-        confidence=0.7,
-        source="api",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    defaults.update(kwargs)
-    return KnowledgeEvent(**defaults)
+from tests.conftest import FakeEmbedding, FakeLLM, FakeStorage, make_event as _make_event
 
 
 # ---------------------------------------------------------------------------
@@ -789,3 +767,508 @@ class TestAuditClassification:
         maint = MaintenanceUseCase(storage, FakeEmbedding())
         result = await maint.audit_classification()
         assert len(result["event_ids_to_reclassify"]) == 1
+
+
+# ---------------------------------------------------------------------------
+# Entity Embedding at Ingest Time (Phase 12)
+# ---------------------------------------------------------------------------
+
+class TestEntityEmbeddingAtIngest:
+
+    @pytest.mark.asyncio
+    async def test_entity_gets_embedding_at_ingest(self):
+        """Entities extracted during ingest should have embeddings populated."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        class LLMWithEntities(FakeLLM):
+            async def extract_metadata(self, content):
+                base = await super().extract_metadata(content)
+                base["entities"] = [
+                    {"type": "company", "name": "OpenAI"},
+                    {"type": "person", "name": "Sam Altman"},
+                ]
+                return base
+
+        llm = LLMWithEntities()
+        uc = IngestUseCase(storage, embedding, llm, workspace_id="default")
+        await uc.import_text("GPT-5 News", "OpenAI announced GPT-5. Sam Altman confirmed.")
+
+        # Two entities stored with canonical names and embeddings
+        assert len(storage._entities) == 2
+        names = {e.name for e in storage._entities.values()}
+        assert names == {"openai", "sam altman"}
+        for entity in storage._entities.values():
+            assert len(entity.embedding) == embedding.dimensions
+
+    @pytest.mark.asyncio
+    async def test_entity_embedding_failure_does_not_block_ingest(self):
+        """If embedding fails for an entity, ingest should still complete."""
+        storage = FakeStorage()
+
+        class FailingEmbedding(FakeEmbedding):
+            async def embed(self, text):
+                # Fail on the canonical name "openai"
+                if text == "openai":
+                    raise RuntimeError("Embedding service down")
+                return await super().embed(text)
+
+        class LLMWithEntities(FakeLLM):
+            async def extract_metadata(self, content):
+                base = await super().extract_metadata(content)
+                base["entities"] = [
+                    {"type": "company", "name": "OpenAI"},
+                    {"type": "person", "name": "Sam Altman"},
+                ]
+                return base
+
+        llm = LLMWithEntities()
+        uc = IngestUseCase(storage, FailingEmbedding(), llm, workspace_id="default")
+        event = await uc.import_text("AI News", "OpenAI and Sam Altman news")
+
+        # Event should still be created
+        assert event is not None
+        assert event.id in storage._events
+        # Both entities stored — one without embedding (failed), one with
+        assert len(storage._entities) == 2
+        entities = list(storage._entities.values())
+        names = {e.name for e in entities}
+        assert names == {"openai", "sam altman"}
+        openai_ent = next(e for e in entities if e.name == "openai")
+        altman_ent = next(e for e in entities if e.name == "sam altman")
+        assert openai_ent.embedding == []  # failed, empty
+        assert len(altman_ent.embedding) == 512  # succeeded
+
+
+# ---------------------------------------------------------------------------
+# Entity Canonicalization (Phase 13)
+# ---------------------------------------------------------------------------
+
+class TestEntityCanonicalization:
+
+    def _make_llm(self, entities):
+        """Create a FakeLLM that returns specific entities."""
+        class LLMWithEntities(FakeLLM):
+            async def extract_metadata(self, content):
+                base = await super().extract_metadata(content)
+                base["entities"] = entities
+                return base
+        return LLMWithEntities()
+
+    @pytest.mark.asyncio
+    async def test_case_variants_resolve_to_same_entity(self):
+        """'OpenAI', 'openai', 'OPENAI' should all map to one entity."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        # First ingest: "OpenAI"
+        llm1 = self._make_llm([{"type": "company", "name": "OpenAI"}])
+        uc1 = IngestUseCase(storage, embedding, llm1, workspace_id="default")
+        await uc1.import_text("News 1", "OpenAI released something.")
+
+        assert len(storage._entities) == 1
+        ent = list(storage._entities.values())[0]
+        assert ent.name == "openai"
+        assert "OpenAI" in ent.aliases
+
+        # Second ingest: "OPENAI" — should reuse same entity
+        llm2 = self._make_llm([{"type": "company", "name": "OPENAI"}])
+        uc2 = IngestUseCase(storage, embedding, llm2, workspace_id="default")
+        await uc2.import_text("News 2", "OPENAI did something else.")
+
+        assert len(storage._entities) == 1
+        ent = list(storage._entities.values())[0]
+        assert "OPENAI" in ent.aliases
+
+    @pytest.mark.asyncio
+    async def test_hyphen_space_variants_resolve(self):
+        """'Open AI' and 'Open-AI' should resolve to same entity as 'openai'... wait,
+        'Open AI' -> 'open ai' and 'Open-AI' -> 'open ai'. These match each other
+        but not 'OpenAI' -> 'openai'. This is correct — only truly equivalent forms merge."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        llm1 = self._make_llm([{"type": "company", "name": "Open-AI"}])
+        uc1 = IngestUseCase(storage, embedding, llm1, workspace_id="default")
+        await uc1.import_text("News 1", "Open-AI stuff.")
+
+        llm2 = self._make_llm([{"type": "company", "name": "Open AI"}])
+        uc2 = IngestUseCase(storage, embedding, llm2, workspace_id="default")
+        await uc2.import_text("News 2", "Open AI stuff.")
+
+        # Both resolve to canonical "open ai"
+        assert len(storage._entities) == 1
+        ent = list(storage._entities.values())[0]
+        assert ent.name == "open ai"
+
+    @pytest.mark.asyncio
+    async def test_corporate_suffix_stripped(self):
+        """'Tesla, Inc.' and 'Tesla' should resolve to same entity."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        llm1 = self._make_llm([{"type": "company", "name": "Tesla, Inc."}])
+        uc1 = IngestUseCase(storage, embedding, llm1, workspace_id="default")
+        await uc1.import_text("News 1", "Tesla Inc filed.")
+
+        llm2 = self._make_llm([{"type": "company", "name": "Tesla"}])
+        uc2 = IngestUseCase(storage, embedding, llm2, workspace_id="default")
+        await uc2.import_text("News 2", "Tesla earnings.")
+
+        assert len(storage._entities) == 1
+
+    @pytest.mark.asyncio
+    async def test_different_entities_stay_separate(self):
+        """Clearly different entities should not be merged."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        llm = self._make_llm([
+            {"type": "company", "name": "OpenAI"},
+            {"type": "company", "name": "Google"},
+        ])
+        uc = IngestUseCase(storage, embedding, llm, workspace_id="default")
+        await uc.import_text("News", "OpenAI vs Google.")
+
+        assert len(storage._entities) == 2
+
+    @pytest.mark.asyncio
+    async def test_different_types_stay_separate(self):
+        """Same name but different entity types should remain separate."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        llm = self._make_llm([
+            {"type": "company", "name": "Apple"},
+            {"type": "concept", "name": "Apple"},
+        ])
+        uc = IngestUseCase(storage, embedding, llm, workspace_id="default")
+        await uc.import_text("News", "Apple the company and apple the fruit.")
+
+        assert len(storage._entities) == 2
+
+    @pytest.mark.asyncio
+    async def test_alias_appended_on_reuse(self):
+        """When reusing a canonical entity, the raw name should be added as alias."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        llm1 = self._make_llm([{"type": "person", "name": "Sam Altman"}])
+        uc1 = IngestUseCase(storage, embedding, llm1, workspace_id="default")
+        await uc1.import_text("News 1", "Sam Altman spoke.")
+
+        llm2 = self._make_llm([{"type": "person", "name": "SAM ALTMAN"}])
+        uc2 = IngestUseCase(storage, embedding, llm2, workspace_id="default")
+        await uc2.import_text("News 2", "SAM ALTMAN tweeted.")
+
+        assert len(storage._entities) == 1
+        ent = list(storage._entities.values())[0]
+        assert ent.name == "sam altman"
+        assert "Sam Altman" in ent.aliases
+        assert "SAM ALTMAN" in ent.aliases
+
+
+# ---------------------------------------------------------------------------
+# Thesis Trend Logic (Phase 12)
+# ---------------------------------------------------------------------------
+
+from cortex.use_cases.analyze import AnalyzeUseCase
+
+
+class TestThesisTrend:
+    """Unit tests for AnalyzeUseCase.thesis_coverage trend calculation."""
+
+    def _make_storage(self, thesis_coverage_data, trend_data):
+        """Create a FakeStorage with preconfigured thesis_coverage + thesis_trend."""
+        storage = FakeStorage()
+
+        async def _thesis_coverage(workspace_id="default"):
+            return thesis_coverage_data
+
+        async def _thesis_trend(workspace_id="default", window_days=14):
+            return trend_data
+
+        storage.thesis_coverage = _thesis_coverage
+        storage.thesis_trend = _thesis_trend
+        return storage
+
+    @pytest.mark.asyncio
+    async def test_trend_up(self):
+        """Delta > 0.05 => trend_direction = 'up'."""
+        from cortex.domain.entities import ThesisCoverage
+        tc = ThesisCoverage(
+            thesis_name="AI Agents", event_count=10, avg_confidence=0.8,
+            type_distribution={}, latest_update=None, days_since_update=0,
+        )
+        trend = {
+            "AI Agents": {
+                "recent_avg": 0.9, "previous_avg": 0.7,
+                "recent_count": 5, "previous_count": 5,
+            }
+        }
+        storage = self._make_storage([tc], trend)
+        uc = AnalyzeUseCase(storage, "default")
+        result = await uc.thesis_coverage()
+
+        assert len(result) == 1
+        assert result[0].trend_direction == "up"
+        assert result[0].confidence_delta == 0.2
+
+    @pytest.mark.asyncio
+    async def test_trend_down(self):
+        """Delta < -0.05 => trend_direction = 'down'."""
+        from cortex.domain.entities import ThesisCoverage
+        tc = ThesisCoverage(
+            thesis_name="Solar", event_count=8, avg_confidence=0.6,
+            type_distribution={}, latest_update=None, days_since_update=0,
+        )
+        trend = {
+            "Solar": {
+                "recent_avg": 0.5, "previous_avg": 0.8,
+                "recent_count": 4, "previous_count": 4,
+            }
+        }
+        storage = self._make_storage([tc], trend)
+        uc = AnalyzeUseCase(storage, "default")
+        result = await uc.thesis_coverage()
+
+        assert result[0].trend_direction == "down"
+        assert result[0].confidence_delta == -0.3
+
+    @pytest.mark.asyncio
+    async def test_trend_flat(self):
+        """Delta between -0.05 and 0.05 => 'flat'."""
+        from cortex.domain.entities import ThesisCoverage
+        tc = ThesisCoverage(
+            thesis_name="World Models", event_count=6, avg_confidence=0.75,
+            type_distribution={}, latest_update=None, days_since_update=0,
+        )
+        trend = {
+            "World Models": {
+                "recent_avg": 0.76, "previous_avg": 0.74,
+                "recent_count": 3, "previous_count": 3,
+            }
+        }
+        storage = self._make_storage([tc], trend)
+        uc = AnalyzeUseCase(storage, "default")
+        result = await uc.thesis_coverage()
+
+        assert result[0].trend_direction == "flat"
+        assert abs(result[0].confidence_delta) <= 0.05
+
+    @pytest.mark.asyncio
+    async def test_insufficient_data_no_trend(self):
+        """No trend data for a thesis => 'insufficient_data'."""
+        from cortex.domain.entities import ThesisCoverage
+        tc = ThesisCoverage(
+            thesis_name="Orphan Thesis", event_count=2, avg_confidence=0.5,
+            type_distribution={}, latest_update=None, days_since_update=0,
+        )
+        storage = self._make_storage([tc], {})
+        uc = AnalyzeUseCase(storage, "default")
+        result = await uc.thesis_coverage()
+
+        assert result[0].trend_direction == "insufficient_data"
+
+    @pytest.mark.asyncio
+    async def test_insufficient_data_low_sample(self):
+        """Both windows have data but < 2 samples => 'insufficient_data'."""
+        from cortex.domain.entities import ThesisCoverage
+        tc = ThesisCoverage(
+            thesis_name="Harness", event_count=3, avg_confidence=0.6,
+            type_distribution={}, latest_update=None, days_since_update=0,
+        )
+        trend = {
+            "Harness": {
+                "recent_avg": 0.9, "previous_avg": 0.4,
+                "recent_count": 1, "previous_count": 1,
+            }
+        }
+        storage = self._make_storage([tc], trend)
+        uc = AnalyzeUseCase(storage, "default")
+        result = await uc.thesis_coverage()
+
+        assert result[0].trend_direction == "insufficient_data"
+        assert result[0].confidence_delta is None
+
+    @pytest.mark.asyncio
+    async def test_insufficient_data_one_window_null(self):
+        """One window avg is None => 'insufficient_data'."""
+        from cortex.domain.entities import ThesisCoverage
+        tc = ThesisCoverage(
+            thesis_name="Meta", event_count=1, avg_confidence=0.5,
+            type_distribution={}, latest_update=None, days_since_update=0,
+        )
+        trend = {
+            "Meta": {
+                "recent_avg": 0.8, "previous_avg": None,
+                "recent_count": 3, "previous_count": 0,
+            }
+        }
+        storage = self._make_storage([tc], trend)
+        uc = AnalyzeUseCase(storage, "default")
+        result = await uc.thesis_coverage()
+
+        assert result[0].trend_direction == "insufficient_data"
+
+
+# ---------------------------------------------------------------------------
+# MaintenanceUseCase — backfill / normalize / deduplicate
+# ---------------------------------------------------------------------------
+
+from cortex.use_cases.maintenance import MaintenanceUseCase
+
+
+class TestBackfillEntityEmbeddings:
+
+    @pytest.mark.asyncio
+    async def test_backfill_processes_all(self):
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+        _entities_without = [
+            {"id": "e1", "name": "OpenAI"},
+            {"id": "e2", "name": "Google"},
+        ]
+        total = len(_entities_without)
+
+        async def _count(workspace_id="default"):
+            return total
+
+        async def _get(workspace_id="default", limit=50):
+            batch = _entities_without[:limit]
+            del _entities_without[:limit]
+            return batch
+
+        updated = {}
+        async def _update(entity_id, emb):
+            updated[entity_id] = emb
+
+        storage.count_entities_without_embedding = _count
+        storage.get_entities_without_embedding = _get
+        storage.update_entity_embedding = _update
+
+        uc = MaintenanceUseCase(storage, embedding, "default")
+        stats = await uc.backfill_entity_embeddings()
+
+        assert stats["total"] == 2
+        assert stats["processed"] == 2
+        assert "e1" in updated
+        assert "e2" in updated
+        assert len(updated["e1"]) == 512
+
+    @pytest.mark.asyncio
+    async def test_backfill_empty(self):
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+        uc = MaintenanceUseCase(storage, embedding, "default")
+        stats = await uc.backfill_entity_embeddings()
+        assert stats["total"] == 0
+        assert stats["processed"] == 0
+
+
+class TestNormalizeTags:
+
+    @pytest.mark.asyncio
+    async def test_canonical_form_applied(self):
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        events_with_tags = [
+            {"id": "ev1", "tags": ["AI", "ai", "Ai"]},
+            {"id": "ev2", "tags": ["machine-learning"]},
+        ]
+        tag_config = {
+            "canonical_forms": {
+                "artificial intelligence": ["AI", "ai"],
+            }
+        }
+
+        updated = {}
+        async def _get_all(workspace_id="default"):
+            return events_with_tags
+        async def _update(event_id, tags):
+            updated[event_id] = tags
+
+        storage.get_all_events_with_tags = _get_all
+        storage.update_event_tags = _update
+
+        uc = MaintenanceUseCase(storage, embedding, "default", tag_config=tag_config)
+        stats = await uc.normalize_tags()
+
+        assert stats["events_checked"] == 2
+        assert stats["events_updated"] >= 1
+        assert "ev1" in updated
+        # All three variants should map to canonical
+        assert updated["ev1"] == ["artificial intelligence"]
+
+    @pytest.mark.asyncio
+    async def test_no_changes_needed(self):
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        async def _get_all(workspace_id="default"):
+            return [{"id": "ev1", "tags": ["clean tag"]}]
+        async def _update(event_id, tags):
+            pass
+
+        storage.get_all_events_with_tags = _get_all
+        storage.update_event_tags = _update
+
+        uc = MaintenanceUseCase(storage, embedding, "default")
+        stats = await uc.normalize_tags()
+        assert stats["events_updated"] == 0
+
+
+class TestDeduplicateEntities:
+
+    @pytest.mark.asyncio
+    async def test_merges_duplicate_names(self):
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        entities = [
+            {"id": "e1", "name": "OpenAI", "mention_count": 10},
+            {"id": "e2", "name": "openai", "mention_count": 3},
+            {"id": "e3", "name": "Google", "mention_count": 5},
+        ]
+        merged = []
+
+        async def _get_all(workspace_id="default"):
+            return entities
+        async def _merge(keep_id, remove_id):
+            merged.append((keep_id, remove_id))
+
+        storage.get_all_entities = _get_all
+        storage.merge_entities = _merge
+
+        uc = MaintenanceUseCase(storage, embedding, "default")
+        stats = await uc.deduplicate_entities()
+
+        assert stats["merged"] == 1
+        assert stats["candidates"] == 1
+        # e1 has more mentions, so e2 gets merged into e1
+        assert merged == [("e1", "e2")]
+
+    @pytest.mark.asyncio
+    async def test_no_duplicates(self):
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        entities = [
+            {"id": "e1", "name": "OpenAI", "mention_count": 10},
+            {"id": "e2", "name": "Google", "mention_count": 5},
+        ]
+
+        async def _get_all(workspace_id="default"):
+            return entities
+        async def _merge(keep_id, remove_id):
+            pass
+
+        storage.get_all_entities = _get_all
+        storage.merge_entities = _merge
+
+        uc = MaintenanceUseCase(storage, embedding, "default")
+        stats = await uc.deduplicate_entities()
+
+        assert stats["merged"] == 0
+        assert stats["candidates"] == 0

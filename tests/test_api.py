@@ -13,28 +13,7 @@ from fastapi.testclient import TestClient
 from cortex.domain.entities import EventType, KnowledgeEvent
 from datetime import datetime, timezone
 
-
-# ------------------------------------------------------------------
-# Helpers
-# ------------------------------------------------------------------
-
-def _make_event(**kwargs) -> KnowledgeEvent:
-    defaults = dict(
-        id=str(uuid.uuid4()),
-        workspace_id="default",
-        type=EventType.NOTE,
-        title="Sample Event",
-        content="Sample content",
-        summary="Sample summary",
-        tags=["sample"],
-        thesis_links=[],
-        confidence=0.75,
-        source="api",
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
-    )
-    defaults.update(kwargs)
-    return KnowledgeEvent(**defaults)
+from tests.conftest import make_event as _make_event
 
 
 # ------------------------------------------------------------------
@@ -47,7 +26,8 @@ def test_stats_returns_valid_structure(client):
     assert response.status_code == 200
     data = response.json()
     assert isinstance(data, dict)
-    assert "total_events" in data
+    assert "events" in data
+    assert "type_distribution" in data
 
 
 def test_search_text_returns_results(client, fake_storage):
@@ -436,6 +416,84 @@ class TestNotificationAPI:
 
 
 # ------------------------------------------------------------------
+# Phase 5: Event Editing + Bulk Notifications
+# ------------------------------------------------------------------
+
+class TestEventPatch:
+
+    def test_patch_event_tags(self, client, fake_storage):
+        event = _make_event()
+        fake_storage._events[event.id] = event
+        response = client.patch(f"/api/v1/events/{event.id}", json={"tags": ["ai", "vc"]})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tags"] == ["ai", "vc"]
+
+    def test_patch_event_title(self, client, fake_storage):
+        event = _make_event()
+        fake_storage._events[event.id] = event
+        response = client.patch(f"/api/v1/events/{event.id}", json={"title": "New Title"})
+        assert response.status_code == 200
+        assert response.json()["title"] == "New Title"
+
+    def test_patch_event_thesis_links(self, client, fake_storage):
+        event = _make_event()
+        fake_storage._events[event.id] = event
+        response = client.patch(f"/api/v1/events/{event.id}", json={"thesis_links": ["AI Agents"]})
+        assert response.status_code == 200
+        assert response.json()["thesis_links"] == ["AI Agents"]
+
+    def test_patch_event_not_found(self, client):
+        response = client.patch("/api/v1/events/nonexistent", json={"title": "X"})
+        assert response.status_code == 404
+
+    def test_patch_event_partial(self, client, fake_storage):
+        event = _make_event()
+        event.tags = ["original"]
+        event.title = "Original"
+        fake_storage._events[event.id] = event
+        response = client.patch(f"/api/v1/events/{event.id}", json={"tags": ["new"]})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tags"] == ["new"]
+        assert data["title"] == "Original"
+
+
+class TestBulkNotification:
+
+    def test_bulk_read_by_status(self, client, fake_storage):
+        from cortex.domain.entities import Notification
+        import asyncio
+        for i in range(3):
+            n = Notification(title=f"N{i}", body="b", source_kind="signal")
+            asyncio.run(fake_storage.insert_notification(n))
+        response = client.post("/api/v1/notifications/bulk-action",
+                               json={"action": "ack", "status_filter": "pending"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"] == 3
+        assert data["failed"] == 0
+
+    def test_bulk_dismiss_by_ids(self, client, fake_storage):
+        from cortex.domain.entities import Notification
+        import asyncio
+        n1 = Notification(title="A", body="a", source_kind="signal")
+        n2 = Notification(title="B", body="b", source_kind="signal")
+        asyncio.run(fake_storage.insert_notification(n1))
+        asyncio.run(fake_storage.insert_notification(n2))
+        response = client.post("/api/v1/notifications/bulk-action",
+                               json={"action": "dismiss", "ids": [n1.id]})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["updated"] == 1
+
+    def test_bulk_invalid_action_rejected(self, client):
+        response = client.post("/api/v1/notifications/bulk-action",
+                               json={"action": "invalid"})
+        assert response.status_code == 422
+
+
+# ------------------------------------------------------------------
 # Phase 5: Health / Ready
 # ------------------------------------------------------------------
 
@@ -452,3 +510,259 @@ class TestHealthReady:
         data = response.json()
         assert data["status"] == "ready"
         assert data["storage"] is True
+
+
+# ------------------------------------------------------------------
+# Previously-untested API routes
+# ------------------------------------------------------------------
+
+class TestCreateEvent:
+    """POST /events (simple create, not /events/ingest)."""
+
+    def test_create_event_returns_201(self, client):
+        response = client.post(
+            "/api/v1/events",
+            json={
+                "title": "Direct Create",
+                "content": "Created via POST /events.",
+                "source": "api",
+            },
+        )
+        assert response.status_code == 201
+        data = response.json()
+        assert data["title"] == "Direct Create"
+        assert "id" in data
+
+    def test_create_event_requires_title(self, client):
+        response = client.post(
+            "/api/v1/events",
+            json={"content": "Missing title"},
+        )
+        assert response.status_code == 422
+
+
+class TestListEvents:
+    """GET /events (list endpoint)."""
+
+    def test_list_events_empty(self, client):
+        response = client.get("/api/v1/events")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_list_events_returns_stored(self, client, fake_storage):
+        e1 = _make_event(title="Event A")
+        e2 = _make_event(title="Event B")
+        fake_storage._events[e1.id] = e1
+        fake_storage._events[e2.id] = e2
+
+        response = client.get("/api/v1/events?limit=10")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 2
+        titles = {d["title"] for d in data}
+        assert titles == {"Event A", "Event B"}
+
+    def test_list_events_with_days_filter(self, client, fake_storage):
+        from datetime import timedelta
+        old = _make_event(
+            title="Old",
+            created_at=datetime.now(timezone.utc) - timedelta(days=60),
+        )
+        recent = _make_event(title="Recent")
+        fake_storage._events[old.id] = old
+        fake_storage._events[recent.id] = recent
+
+        response = client.get("/api/v1/events?days=7")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["title"] == "Recent"
+
+
+class TestThesisCoverage:
+    """GET /thesis (coverage report)."""
+
+    def test_thesis_coverage_empty(self, client):
+        response = client.get("/api/v1/thesis")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_thesis_coverage_returns_structure(self, client, fake_storage):
+        e = _make_event(thesis_links=["AI Agent Infra"], confidence=0.9)
+        fake_storage._events[e.id] = e
+
+        response = client.get("/api/v1/thesis")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 1
+        thesis = data[0]
+        assert "thesis" in thesis
+        assert "event_count" in thesis
+        assert "avg_confidence" in thesis
+        assert "trend_direction" in thesis
+
+
+class TestStaleEvents:
+    """GET /stale."""
+
+    def test_stale_events_empty(self, client):
+        response = client.get("/api/v1/stale")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    def test_stale_events_returns_old_events(self, client, fake_storage):
+        from datetime import timedelta
+        stale = _make_event(
+            title="Stale Event",
+            updated_at=datetime.now(timezone.utc) - timedelta(days=60),
+        )
+        fake_storage._events[stale.id] = stale
+
+        response = client.get("/api/v1/stale?days=30")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) >= 1
+        assert data[0]["title"] == "Stale Event"
+
+
+class TestEntityGraph:
+    """GET /entity/{id}/graph."""
+
+    def test_entity_graph_returns_list(self, client, fake_storage):
+        e = _make_event()
+        fake_storage._events[e.id] = e
+
+        response = client.get(f"/api/v1/entity/{e.id}/graph")
+        assert response.status_code == 200
+        data = response.json()
+        assert isinstance(data, list)
+
+
+class TestRelatedSearch:
+    """GET /search/related/{event_id}."""
+
+    def test_related_empty(self, client, fake_storage):
+        e = _make_event()
+        fake_storage._events[e.id] = e
+
+        response = client.get(f"/api/v1/search/related/{e.id}")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+
+class TestEntitySearch:
+    """GET /entities/search."""
+
+    def test_entity_search_returns_list(self, client):
+        response = client.get("/api/v1/entities/search?q=test")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+
+class TestEntityEvents:
+    """GET /entities/{entity_id}/events."""
+
+    def test_entity_events_returns_list(self, client):
+        response = client.get(f"/api/v1/entities/{uuid.uuid4()}/events")
+        assert response.status_code == 200
+        assert isinstance(response.json(), list)
+
+
+class TestBearerAuth:
+    """Tests for Bearer token authentication middleware."""
+
+    def test_health_is_public(self, authed_client):
+        client, _token = authed_client
+        response = client.get("/api/v1/health")
+        assert response.status_code == 200
+
+    def test_ready_is_public(self, authed_client):
+        client, _token = authed_client
+        response = client.get("/api/v1/ready")
+        assert response.status_code == 200
+
+    def test_api_rejects_no_token(self, authed_client):
+        client, _token = authed_client
+        response = client.get("/api/v1/stats")
+        assert response.status_code == 401
+        assert response.json()["detail"] == "Unauthorized"
+
+    def test_api_rejects_wrong_token(self, authed_client):
+        client, _token = authed_client
+        response = client.get(
+            "/api/v1/stats",
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+        assert response.status_code == 401
+
+    def test_api_accepts_correct_token(self, authed_client):
+        client, token = authed_client
+        response = client.get(
+            "/api/v1/stats",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+    def test_post_endpoint_requires_auth(self, authed_client):
+        client, _token = authed_client
+        response = client.post(
+            "/api/v1/search",
+            json={"query": "test"},
+        )
+        assert response.status_code == 401
+
+    def test_post_endpoint_with_auth(self, authed_client):
+        client, token = authed_client
+        response = client.post(
+            "/api/v1/search",
+            json={"query": "test"},
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert response.status_code == 200
+
+
+class TestSettings:
+    """GET /settings and PUT /settings/llm."""
+
+    def test_get_settings_returns_structure(self, client):
+        response = client.get("/api/v1/settings")
+        assert response.status_code == 200
+        data = response.json()
+        assert "llm" in data
+        assert "workspace" in data
+        assert "embedding_model" in data
+        assert isinstance(data["llm"]["configured"], bool)
+
+    def test_get_settings_llm_status(self, client):
+        """FakeLLM is configured in test fixtures, so configured=True."""
+        response = client.get("/api/v1/settings")
+        data = response.json()
+        # Test fixture provides a FakeLLM, so LLM is configured
+        assert data["llm"]["configured"] is True
+
+    def test_update_llm_with_key(self, client):
+        response = client.put(
+            "/api/v1/settings/llm",
+            json={"api_key": "sk-test-key", "model": "test-model", "base_url": "https://test.api/v1"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "updated"
+        assert data["llm_configured"] is True
+        assert data["model"] == "test-model"
+
+        # Verify settings reflect the change
+        settings = client.get("/api/v1/settings").json()
+        assert settings["llm"]["configured"] is True
+        assert settings["llm"]["model"] == "test-model"
+
+    def test_clear_llm(self, client):
+        # First configure
+        client.put("/api/v1/settings/llm", json={"api_key": "sk-test"})
+        # Then clear
+        response = client.put("/api/v1/settings/llm", json={"api_key": ""})
+        assert response.status_code == 200
+        assert response.json()["status"] == "cleared"
+
+        settings = client.get("/api/v1/settings").json()
+        assert settings["llm"]["configured"] is False

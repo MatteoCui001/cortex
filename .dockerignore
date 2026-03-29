@@ -1,0 +1,15 @@
+.git
+node_modules
+console/node_modules
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+cortex-wechat/
+cortex-openclaw-wechat/
+uploads/
+outputs/
+tmp/
+.env
+config.local.yaml
+config.docker.yaml

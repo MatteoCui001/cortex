@@ -47,16 +47,20 @@ export default function Inbox() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
+    setError(null);
     try {
       const status = statusFilter === "all" ? undefined : statusFilter;
       const data = await api.notifications(status, 100);
       setNotifications(data);
-    } catch { /* ignore */ }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load notifications");
+    }
     setLoading(false);
   }, [statusFilter]);
 
@@ -69,6 +73,19 @@ export default function Inbox() {
       setNotifications((prev) => prev.map((n) => (n.id === id ? updated : n)));
     } catch { /* ignore */ }
     setActing(null);
+  }
+
+  const [bulkActing, setBulkActing] = useState(false);
+
+  async function handleBulkAction(action: "read" | "ack" | "dismiss") {
+    if (action === "dismiss" && !window.confirm("Dismiss all visible notifications?")) return;
+    setBulkActing(true);
+    try {
+      const targetStatus = statusFilter === "all" ? "pending" : statusFilter;
+      await api.bulkNotificationAction(action, undefined, targetStatus);
+      await load();
+    } catch { /* ignore */ }
+    setBulkActing(false);
   }
 
   // Apply priority filter on top of status filter
@@ -108,9 +125,41 @@ export default function Inbox() {
         <span className="text-meta ml-auto">{filtered.length} notifications</span>
       </div>
 
+      {/* Batch actions */}
+      {needsAttention.length > 0 && (
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={() => handleBulkAction("read")}
+            disabled={bulkActing}
+            className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-30"
+            style={{ color: "var(--text-secondary)", background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}
+          >
+            Mark all read
+          </button>
+          <button
+            onClick={() => handleBulkAction("dismiss")}
+            disabled={bulkActing}
+            className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-30"
+            style={{ color: "var(--text-secondary)", background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}
+          >
+            Dismiss all
+          </button>
+          {bulkActing && <span className="text-meta">Processing...</span>}
+        </div>
+      )}
+
+      {error && (
+        <div
+          className="text-[12px] py-3 px-4 rounded-lg mb-4"
+          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
+        >
+          {error}
+        </div>
+      )}
+
       {loading ? (
         <div className="py-16 text-center text-body">Loading...</div>
-      ) : filtered.length === 0 ? (
+      ) : filtered.length === 0 && !error ? (
         <div
           className="rounded-xl p-12 text-center"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}

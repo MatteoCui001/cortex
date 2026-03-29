@@ -3,10 +3,16 @@ REST API routes -- the primary interface for both humans and agents.
 """
 from __future__ import annotations
 
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
+
+from cortex.use_cases.ingest import IngestUseCase
+from cortex.use_cases.analyze import AnalyzeUseCase
 
 router = APIRouter()
 
@@ -32,6 +38,7 @@ async def ready(request: Request):
         await storage.get_notifications("__probe__", limit=1)
         return {"status": "ready", "storage": True}
     except Exception:
+        logger.warning("Readiness probe failed", exc_info=True)
         return {"status": "degraded", "storage": False}
 
 
@@ -81,6 +88,16 @@ class IngestRequest(BaseModel):
     user_annotation: Optional[str] = None
     workspace_id: str = "default"
 
+class EventPatchRequest(BaseModel):
+    tags: Optional[list[str]] = None
+    thesis_links: Optional[list[str]] = None
+    title: Optional[str] = None
+
+class BulkNotificationRequest(BaseModel):
+    action: str = Field(..., pattern="^(read|ack|dismiss)$")
+    ids: Optional[list[str]] = None
+    status_filter: Optional[str] = None
+
 class AnnotateRequest(BaseModel):
     annotation: str
     stance: Optional[str] = None
@@ -115,10 +132,6 @@ class NotificationDetailResponse(BaseModel):
     created_at: str
     delivered_at: Optional[str] = None
     acted_at: Optional[str] = None
-
-
-class AckRequest(BaseModel):
-    signal_feedback_id: Optional[str] = None
 
 
 class SignalResponse(BaseModel):
@@ -277,9 +290,11 @@ async def get_event(event_id: str, request: Request):
 # --- Analysis (Store -> Human + Agent) ---
 
 @router.get("/thesis")
-async def thesis_coverage(request: Request):
-    """Thesis coverage report across all events."""
-    results = await request.app.state.analyze.thesis_coverage()
+async def thesis_coverage(request: Request, trend_window_days: int = 14):
+    """Thesis coverage report with confidence trend."""
+    results = await request.app.state.analyze.thesis_coverage(
+        trend_window_days=trend_window_days,
+    )
     return [
         {
             "thesis": t.thesis_name,
@@ -288,6 +303,11 @@ async def thesis_coverage(request: Request):
             "type_distribution": t.type_distribution,
             "latest_update": t.latest_update.isoformat() if t.latest_update else None,
             "days_since_update": t.days_since_update,
+            "trend_direction": t.trend_direction,
+            "confidence_delta": t.confidence_delta,
+            "recent_avg_confidence": round(t.recent_avg_confidence, 3) if t.recent_avg_confidence is not None else None,
+            "previous_avg_confidence": round(t.previous_avg_confidence, 3) if t.previous_avg_confidence is not None else None,
+            "recent_event_count": t.recent_event_count,
         }
         for t in results
     ]
@@ -335,8 +355,42 @@ async def digest(request: Request, days: int = 1):
             }
             for t in result["stale_theses"]
         ]
+    if "thesis_trends" in result:
+        result["thesis_trends"] = [
+            {
+                "thesis": t.thesis_name,
+                "trend_direction": t.trend_direction,
+                "confidence_delta": t.confidence_delta,
+                "recent_avg_confidence": round(t.recent_avg_confidence, 3) if t.recent_avg_confidence is not None else None,
+                "recent_event_count": t.recent_event_count,
+            }
+            for t in result["thesis_trends"]
+        ]
     return result
 
+
+@router.post("/digest/push")
+async def digest_push(request: Request, days: int = 1):
+    """Generate today's digest and push it as a notification.
+
+    Returns the notification if created, or a message if skipped (dedup/empty).
+    """
+    from cortex.use_cases.digest_push import push_digest
+
+    workspace = request.app.state.config.get("workspace", "default")
+    notif = await push_digest(
+        request.app.state.storage,
+        request.app.state.analyze,
+        workspace_id=workspace,
+        days=days,
+    )
+    if notif:
+        return {
+            "status": "created",
+            "notification_id": notif.id,
+            "title": notif.title,
+        }
+    return {"status": "skipped", "reason": "empty digest or already sent today"}
 
 
 # --- Phase 3: Unified Ingest ---
@@ -378,6 +432,8 @@ async def ingest_event(body: IngestRequest, request: Request):
     # Run signal detection asynchronously (best-effort, don't block response)
     import asyncio
     async def _background_analyze():
+        import logging
+        log = logging.getLogger(__name__)
         try:
             from cortex.use_cases.ingest import IngestUseCase as _IUC
             ingest_uc = _IUC(
@@ -388,15 +444,47 @@ async def ingest_event(body: IngestRequest, request: Request):
             )
             signals = await ingest_uc.post_ingest_analyze(event)
             if signals:
+                from cortex.use_cases.push_detector import PushDetector
                 from cortex.use_cases.notification_manager import NotificationManager
-                nm = NotificationManager(request.app.state.storage)
-                await nm.process(signals)
-        except Exception as exc:
-            import logging
-            logging.getLogger(__name__).warning("post_ingest_analyze failed: %s", exc)
+                detector = PushDetector(request.app.state.storage, workspace)
+                webhook_cfg = request.app.state.config.get(
+                    "notifications", {},
+                ).get("webhook", {})
+                nm = NotificationManager(
+                    request.app.state.storage,
+                    detector,
+                    webhook_cfg=webhook_cfg,
+                    workspace_id=workspace,
+                )
+                created = await nm.process(signals)
+                if created:
+                    log.info(
+                        "post_ingest_analyze: %d notification(s) created for event %s",
+                        len(created), event.id,
+                    )
+        except Exception:
+            log.exception("post_ingest_analyze failed for event %s", event.id)
 
     asyncio.create_task(_background_analyze())
 
+    return _event_to_response(event)
+
+
+# --- Event editing ---
+
+@router.patch("/events/{event_id}", response_model=EventResponse)
+async def patch_event(event_id: str, body: EventPatchRequest, request: Request):
+    """Partial update of event fields (tags, thesis_links, title)."""
+    workspace = request.app.state.config.get("workspace", "default")
+    updated = await request.app.state.storage.update_event_fields(
+        event_id, workspace,
+        tags=body.tags,
+        thesis_links=body.thesis_links,
+        title=body.title,
+    )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Event not found")
+    event = await request.app.state.storage.get_event(event_id)
     return _event_to_response(event)
 
 
@@ -421,6 +509,11 @@ async def annotate_event(event_id: str, body: AnnotateRequest, request: Request)
         stance=stance,
     )
     aid = await request.app.state.storage.create_annotation(annotation)
+
+    # Sync user_stance back to the event so signal scoring picks it up
+    if stance:
+        await request.app.state.storage.update_event_user_stance(event_id, stance)
+
     return AnnotationResponse(
         id=aid,
         target_type="event",
@@ -486,7 +579,7 @@ async def mark_notification_read(notification_id: str, request: Request):
 
 @router.post("/notifications/{notification_id}/ack",
              response_model=NotificationDetailResponse)
-async def mark_notification_acked(notification_id: str, request: Request, body: AckRequest = None):
+async def mark_notification_acked(notification_id: str, request: Request):
     """Mark a notification as acknowledged."""
     from cortex.domain.entities import NotificationStatus
     return await _transition_notification(request, notification_id, NotificationStatus.ACKED)
@@ -512,6 +605,39 @@ async def mark_notification_delivered(notification_id: str, request: Request):
     return await _transition_notification(request, notification_id, NotificationStatus.DELIVERED)
 
 
+@router.post("/notifications/bulk-action")
+async def bulk_notification_action(body: BulkNotificationRequest, request: Request):
+    """Bulk transition notifications by IDs or status filter."""
+    from cortex.domain.entities import NotificationStatus
+    from cortex.use_cases.push_detector import PushDetector
+    from cortex.use_cases.notification_manager import NotificationManager
+
+    action_map = {"read": NotificationStatus.READ, "ack": NotificationStatus.ACKED, "dismiss": NotificationStatus.DISMISSED}
+    new_status = action_map[body.action]
+
+    workspace = request.app.state.config.get("workspace", "default")
+    storage = request.app.state.storage
+    detector = PushDetector(storage, workspace)
+    webhook_cfg = request.app.state.config.get("notifications", {}).get("webhook", {})
+    manager = NotificationManager(storage, detector, webhook_cfg=webhook_cfg, workspace_id=workspace)
+
+    # Resolve notification IDs
+    ids = body.ids or []
+    if not ids and body.status_filter:
+        notifs = await storage.get_notifications(workspace, status=body.status_filter, limit=500)
+        ids = [n.id for n in notifs]
+
+    updated = 0
+    failed = 0
+    for nid in ids:
+        try:
+            await manager.transition(nid, new_status)
+            updated += 1
+        except (ValueError, Exception):
+            failed += 1
+    return {"updated": updated, "failed": failed}
+
+
 async def _transition_notification(request, notification_id, new_status):
     """Shared transition logic for notification action endpoints."""
     from cortex.use_cases.push_detector import PushDetector
@@ -531,9 +657,10 @@ async def _transition_notification(request, notification_id, new_status):
             raise HTTPException(status_code=404, detail=msg)
         raise HTTPException(status_code=409, detail=msg)
     except Exception:
+        logger.exception("Unexpected error transitioning notification %s", notification_id)
         raise HTTPException(
-            status_code=404,
-            detail=f"Notification {notification_id} not found",
+            status_code=500,
+            detail="Internal error processing notification",
         )
     return _notification_to_response(notif)
 
@@ -585,6 +712,70 @@ async def thesis_feedback_stats(request: Request):
     """Thesis-level feedback aggregation."""
     workspace = request.app.state.config.get("workspace", "default")
     return await request.app.state.storage.get_thesis_feedback_stats(workspace)
+
+
+# --- Settings (runtime LLM configuration) ---
+
+class LLMSettingsRequest(BaseModel):
+    api_key: str = ""
+    model: str = ""
+    base_url: str = ""
+
+
+@router.get("/settings")
+async def get_settings(request: Request):
+    """Get current system settings (LLM status, workspace info)."""
+    llm = request.app.state.llm
+    cfg = request.app.state.config
+    llm_cfg = cfg.get("llm", {}).get("openrouter", {})
+    return {
+        "llm": {
+            "configured": llm is not None,
+            "model": getattr(llm, "_model", "") if llm else llm_cfg.get("model", ""),
+            "base_url": getattr(llm, "_base_url", "") if llm else llm_cfg.get("base_url", ""),
+            "thesis_list": getattr(llm, "_thesis_list", []) if llm else llm_cfg.get("thesis_list", []),
+        },
+        "workspace": cfg.get("workspace", "default"),
+        "embedding_model": cfg.get("embedding", {}).get("local", {}).get("model", ""),
+    }
+
+
+@router.put("/settings/llm")
+async def update_llm_settings(body: LLMSettingsRequest, request: Request):
+    """Update LLM configuration at runtime. Reinitializes LLM adapter and use cases."""
+    cfg = request.app.state.config
+    llm_cfg = cfg.get("llm", {}).get("openrouter", {})
+    workspace = cfg.get("workspace", "default")
+
+    api_key = body.api_key.strip()
+    if not api_key:
+        # Clear LLM
+        request.app.state.llm = None
+        request.app.state.ingest = IngestUseCase(
+            request.app.state.storage, request.app.state.embedding, None, workspace,
+        )
+        request.app.state.analyze = AnalyzeUseCase(
+            request.app.state.storage, workspace, llm=None,
+        )
+        return {"status": "cleared", "llm_configured": False}
+
+    from cortex.adapters.llm.adapter import OpenRouterLLM
+    llm = OpenRouterLLM(
+        api_key=api_key,
+        model=body.model or llm_cfg.get("model", "anthropic/claude-haiku-4.5"),
+        base_url=body.base_url or llm_cfg.get("base_url", "https://openrouter.ai/api/v1"),
+        chat_endpoint=llm_cfg.get("chat_endpoint", "/chat/completions"),
+        thesis_list=llm_cfg.get("thesis_list"),
+    )
+
+    request.app.state.llm = llm
+    request.app.state.ingest = IngestUseCase(
+        request.app.state.storage, request.app.state.embedding, llm, workspace,
+    )
+    request.app.state.analyze = AnalyzeUseCase(
+        request.app.state.storage, workspace, llm=llm,
+    )
+    return {"status": "updated", "llm_configured": True, "model": llm._model}
 
 
 # ------------------------------------------------------------------

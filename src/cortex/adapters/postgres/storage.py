@@ -22,10 +22,20 @@ class PostgresStorage(StoragePort):
     def __init__(self, dsn: str):
         self._dsn = dsn
         self._pool: Optional[asyncpg.Pool] = None
+        self._fts_config = "simple"  # detected at connect time
 
     async def connect(self):
         self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=10)
-        await self._pool.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        try:
+            await self._pool.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        except Exception:
+            pass  # pgvector not available — semantic search will fail gracefully
+        # Detect which text search config is available
+        row = await self._pool.fetchrow(
+            "SELECT 1 FROM pg_ts_config WHERE cfgname = 'zhcfg'"
+        )
+        if row:
+            self._fts_config = "zhcfg"
 
     async def close(self):
         if self._pool:
@@ -140,6 +150,45 @@ class PostgresStorage(StoragePort):
         )
         return str(row["id"])
 
+    async def find_entity_by_name(
+        self, workspace_id: str, entity_type: str, name: str,
+    ) -> Optional[Entity]:
+        sql = """
+        SELECT id, workspace_id, type, name, aliases, properties, embedding,
+               created_at, updated_at
+        FROM entities
+        WHERE workspace_id = $1 AND type = $2 AND name = $3
+        LIMIT 1
+        """
+        row = await self._pool.fetchrow(sql, workspace_id, entity_type, name)
+        if not row:
+            return None
+        aliases = json.loads(row["aliases"]) if row["aliases"] else []
+        properties = json.loads(row["properties"]) if row["properties"] else {}
+        return Entity(
+            id=str(row["id"]),
+            workspace_id=row["workspace_id"],
+            type=EntityType(row["type"]),
+            name=row["name"],
+            aliases=aliases,
+            properties=properties,
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    async def append_entity_alias(self, entity_id: str, alias: str) -> None:
+        sql = """
+        UPDATE entities
+        SET aliases = CASE
+                WHEN NOT (aliases @> to_jsonb($2::text))
+                THEN aliases || to_jsonb($2::text)
+                ELSE aliases
+            END,
+            updated_at = now()
+        WHERE id = $1::uuid
+        """
+        await self._pool.execute(sql, entity_id, alias)
+
     async def insert_relation(self, relation: Relation) -> str:
         sql = """
         INSERT INTO relations (
@@ -246,11 +295,12 @@ class PostgresStorage(StoragePort):
         if type_filter:
             params.append(type_filter)
 
+        fts_cfg = self._fts_config
         sql = f"""
-        SELECT *, ts_rank(fts, plainto_tsquery('zhcfg', $1)) AS rank
+        SELECT *, ts_rank(fts, plainto_tsquery('{fts_cfg}', $1)) AS rank
         FROM events
         WHERE workspace_id = $2
-          AND fts @@ plainto_tsquery('zhcfg', $1)
+          AND fts @@ plainto_tsquery('{fts_cfg}', $1)
           {type_clause}
         ORDER BY rank DESC
         LIMIT $3
@@ -385,6 +435,50 @@ class PostgresStorage(StoragePort):
             ))
         return results
 
+    async def thesis_trend(
+        self,
+        workspace_id: str = "default",
+        window_days: int = 14,
+    ) -> dict[str, dict]:
+        """Compute per-thesis confidence trend: recent window vs previous window.
+
+        Returns {thesis_name: {recent_avg, previous_avg, recent_count, previous_count}}.
+        """
+        sql = """
+        WITH unnested AS (
+            SELECT
+                jsonb_array_elements_text(thesis_links) AS thesis,
+                confidence,
+                created_at
+            FROM events
+            WHERE workspace_id = $1
+              AND thesis_links != '[]'::jsonb
+              AND created_at >= now() - make_interval(days => $2 * 2)
+        )
+        SELECT
+            thesis,
+            AVG(CASE WHEN created_at >= now() - make_interval(days => $2)
+                     THEN confidence END) AS recent_avg,
+            COUNT(CASE WHEN created_at >= now() - make_interval(days => $2)
+                       THEN 1 END) AS recent_count,
+            AVG(CASE WHEN created_at < now() - make_interval(days => $2)
+                     THEN confidence END) AS previous_avg,
+            COUNT(CASE WHEN created_at < now() - make_interval(days => $2)
+                       THEN 1 END) AS previous_count
+        FROM unnested
+        GROUP BY thesis
+        """
+        rows = await self._pool.fetch(sql, workspace_id, window_days)
+        result = {}
+        for r in rows:
+            result[r["thesis"]] = {
+                "recent_avg": float(r["recent_avg"]) if r["recent_avg"] is not None else None,
+                "previous_avg": float(r["previous_avg"]) if r["previous_avg"] is not None else None,
+                "recent_count": r["recent_count"],
+                "previous_count": r["previous_count"],
+            }
+        return result
+
     async def daily_events(
         self,
         target_date: date | None = None,
@@ -424,7 +518,7 @@ class PostgresStorage(StoragePort):
             "events": row["events"],
             "entities": row["entities"],
             "relations": row["relations"],
-            "events_by_type": json.loads(row["events_by_type"]) if row["events_by_type"] else {},
+            "type_distribution": json.loads(row["events_by_type"]) if row["events_by_type"] else {},
         }
 
     async def event_exists(self, source_path: str, workspace_id: str = "default") -> bool:
@@ -467,6 +561,38 @@ class PostgresStorage(StoragePort):
             workspace_id,
         )
         return [{"id": str(r["id"]), "tags": json.loads(r["tags"]) if isinstance(r["tags"], str) else r["tags"]} for r in rows]
+
+    async def update_event_fields(
+        self,
+        event_id: str,
+        workspace_id: str,
+        *,
+        tags: list[str] | None = None,
+        thesis_links: list[str] | None = None,
+        title: str | None = None,
+    ) -> bool:
+        sets: list[str] = []
+        args: list = []
+        idx = 1
+        if tags is not None:
+            sets.append(f"tags = ${idx}::jsonb")
+            args.append(json.dumps(tags))
+            idx += 1
+        if thesis_links is not None:
+            sets.append(f"thesis_links = ${idx}::jsonb")
+            args.append(json.dumps(thesis_links))
+            idx += 1
+        if title is not None:
+            sets.append(f"title = ${idx}")
+            args.append(title)
+            idx += 1
+        if not sets:
+            return False
+        sets.append("updated_at = now()")
+        args.extend([event_id, workspace_id])
+        sql = f"UPDATE events SET {', '.join(sets)} WHERE id = ${idx} AND workspace_id = ${idx + 1}"
+        result = await self._pool.execute(sql, *args)
+        return result.endswith("1")
 
     async def update_event_tags(self, event_id: str, tags: list[str]):
         await self._pool.execute(
@@ -678,6 +804,13 @@ class PostgresStorage(StoragePort):
         """
         rows = await self._pool.fetch(sql, workspace_id, limit)
         return [_row_to_event(row) for row in rows]
+
+    async def update_event_user_stance(self, event_id: str, user_stance: str):
+        """Update user_stance on an event (e.g. after annotation)."""
+        await self._pool.execute(
+            "UPDATE events SET user_stance = $1, updated_at = now() WHERE id = $2::uuid",
+            user_stance, event_id,
+        )
 
     async def update_event_classification(
         self, event_id: str, source_type: str, source_weight: float,

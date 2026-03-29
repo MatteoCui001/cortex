@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { api, type Event } from "../api";
+import TypeLabel from "../components/TypeLabel";
 import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
 
 const DAY_FILTERS = [
@@ -7,24 +9,6 @@ const DAY_FILTERS = [
   { label: "30d", days: 30 },
   { label: "All", days: undefined },
 ] as const;
-
-function TypeLabel({ type }: { type: string }) {
-  const map: Record<string, { color: string; bg: string }> = {
-    article: { color: "var(--type-article)", bg: "var(--type-article-bg)" },
-    note: { color: "var(--type-note)", bg: "var(--type-note-bg)" },
-    chat: { color: "var(--type-chat)", bg: "var(--type-chat-bg)" },
-    meeting: { color: "var(--type-meeting)", bg: "var(--type-meeting-bg)" },
-    thesis: { color: "var(--type-thesis)", bg: "var(--type-thesis-bg)" },
-    voice_memo: { color: "var(--type-voice)", bg: "var(--type-voice-bg)" },
-    document: { color: "var(--type-document)", bg: "var(--type-document-bg)" },
-  };
-  const s = map[type] ?? { color: "var(--text-tertiary)", bg: "var(--bg-elevated)" };
-  return (
-    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: s.color, background: s.bg }}>
-      {type}
-    </span>
-  );
-}
 
 function MetaBadge({ children }: { children: string }) {
   return (
@@ -70,16 +54,27 @@ function SourceLink({ path }: { path: string | null }) {
 }
 
 export default function Events() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const thesisFilter = searchParams.get("thesis");
+
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<number | undefined>(30);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    api.events(100, days).then(setEvents).finally(() => setLoading(false));
-  }, [days]);
+    setError(null);
+    const req = thesisFilter
+      ? api.thesisEvidence(thesisFilter)
+      : api.events(100, days);
+    req
+      .then(setEvents)
+      .catch((e) => setError(e.message || "Failed to load events"))
+      .finally(() => setLoading(false));
+  }, [days, thesisFilter]);
 
   return (
     <div>
@@ -87,32 +82,58 @@ export default function Events() {
       <div className="flex items-baseline justify-between mb-6">
         <div>
           <h1 className="text-heading">Events</h1>
-          <p className="text-caption mt-1">Everything your system has ingested</p>
+          <p className="text-caption mt-1">
+            {thesisFilter
+              ? <>Evidence for <span style={{ color: "var(--text-accent)" }}>{thesisFilter}</span></>
+              : "Everything your system has ingested"
+            }
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <span className="text-meta">{events.length} events</span>
-          <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-surface)" }}>
-            {DAY_FILTERS.map((f) => (
-              <button
-                key={f.label}
-                onClick={() => setDays(f.days)}
-                className="text-[11px] px-2.5 py-1 rounded-md transition-all duration-150"
-                style={{
-                  background: days === f.days ? "var(--bg-elevated)" : "transparent",
-                  color: days === f.days ? "var(--text-primary)" : "var(--text-tertiary)",
-                  fontWeight: days === f.days ? 500 : 400,
-                }}
-              >
-                {f.label}
-              </button>
-            ))}
-          </div>
+          {thesisFilter ? (
+            <button
+              onClick={() => setSearchParams({})}
+              className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
+              style={{ color: "var(--text-accent-dim)", border: "1px solid var(--border-accent)" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(129,140,248,0.08)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              Clear filter
+            </button>
+          ) : (
+            <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-surface)" }}>
+              {DAY_FILTERS.map((f) => (
+                <button
+                  key={f.label}
+                  onClick={() => setDays(f.days)}
+                  className="text-[11px] px-2.5 py-1 rounded-md transition-all duration-150"
+                  style={{
+                    background: days === f.days ? "var(--bg-elevated)" : "transparent",
+                    color: days === f.days ? "var(--text-primary)" : "var(--text-tertiary)",
+                    fontWeight: days === f.days ? 500 : 400,
+                  }}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
+      {error && (
+        <div
+          className="text-[12px] py-3 px-4 rounded-lg mb-4"
+          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
+        >
+          {error}
+        </div>
+      )}
+
       {loading ? (
         <div className="py-16 text-center text-body">Loading...</div>
-      ) : events.length === 0 ? (
+      ) : events.length === 0 && !error ? (
         <div
           className="rounded-xl p-16 text-center"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}

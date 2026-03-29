@@ -3,10 +3,12 @@ FastAPI application factory.
 """
 from __future__ import annotations
 
+import asyncio
+import hmac
+import logging
 import os
 from contextlib import asynccontextmanager
 
-import yaml
 from fastapi import FastAPI
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
@@ -33,7 +35,7 @@ class _BearerAuthMiddleware(BaseHTTPMiddleware):
         if not request.url.path.startswith("/api/"):
             return await call_next(request)
         auth = request.headers.get("authorization", "")
-        if auth == f"Bearer {_API_TOKEN}":
+        if hmac.compare_digest(auth, f"Bearer {_API_TOKEN}"):
             return await call_next(request)
         return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
@@ -69,7 +71,6 @@ async def lifespan(app: FastAPI):
         dims=embedding_cfg.get("dimensions", 384),
     )
 
-    import os
     api_key = llm_cfg.get("api_key", "") or ""
     if api_key.startswith("${") and api_key.endswith("}"):
         api_key = os.environ.get(api_key[2:-1], "")
@@ -96,11 +97,68 @@ async def lifespan(app: FastAPI):
     app.state.workspace = workspace
     app.state.ingest = IngestUseCase(storage, embedding, llm, workspace)
     app.state.search = SearchUseCase(storage, embedding, workspace)
-    app.state.analyze = AnalyzeUseCase(storage, workspace)
+    app.state.analyze = AnalyzeUseCase(storage, workspace, llm=llm)
+
+    # Start digest push scheduler if enabled
+    digest_task = None
+    digest_cfg = cfg.get("notifications", {}).get("digest_push", {})
+    if digest_cfg.get("enabled"):
+        digest_task = asyncio.create_task(
+            _digest_scheduler(storage, app.state.analyze, workspace, digest_cfg)
+        )
 
     yield
 
+    if digest_task and not digest_task.done():
+        digest_task.cancel()
+        try:
+            await digest_task
+        except asyncio.CancelledError:
+            pass
     await storage.close()
+
+
+_logger = logging.getLogger(__name__)
+
+
+def _parse_cron_hm(cron: str) -> tuple[int, int]:
+    """Parse simple 'M H * * *' cron expression, return (hour, minute)."""
+    parts = cron.strip().split()
+    if len(parts) < 2:
+        return 9, 0
+    try:
+        return int(parts[1]), int(parts[0])
+    except ValueError:
+        return 9, 0
+
+
+async def _digest_scheduler(storage, analyze, workspace: str, cfg: dict):
+    """Background loop: push daily digest at the configured cron time."""
+    from datetime import datetime, timezone
+    from cortex.use_cases.digest_push import push_digest
+
+    hour, minute = _parse_cron_hm(cfg.get("cron", "0 9 * * *"))
+    days = cfg.get("days", 1)
+    _logger.info("Digest push scheduler started: %02d:%02d daily, %dd window", hour, minute, days)
+
+    last_push_date = None
+    while True:
+        try:
+            now = datetime.now(timezone.utc)
+            # Simple daily check: push once per day at or after the target time
+            today = now.date()
+            if today != last_push_date and now.hour >= hour and (now.hour > hour or now.minute >= minute):
+                notif = await push_digest(storage, analyze, workspace_id=workspace, days=days)
+                if notif:
+                    _logger.info("Digest pushed: %s", notif.title)
+                else:
+                    _logger.debug("Digest push skipped (empty or dedup)")
+                last_push_date = today
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _logger.warning("Digest push failed", exc_info=True)
+        await asyncio.sleep(60)  # Check every minute
 
 
 def create_app() -> FastAPI:
@@ -116,14 +174,18 @@ def create_app() -> FastAPI:
     # Auth middleware (must be added before CORS so it runs after CORS preflight)
     app.add_middleware(_BearerAuthMiddleware)
 
-    # CORS — allow local console dev server
+    # CORS — configurable origins, defaults to Vite dev server
     from fastapi.middleware.cors import CORSMiddleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    cors_origins = cfg.get("api", {}).get("cors_origins", [
+        "http://localhost:5173", "http://127.0.0.1:5173",
+    ])
+    if cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=cors_origins,
+            allow_methods=["*"],
+            allow_headers=["*"],
+        )
 
     app.include_router(router, prefix="/api/v1")
 
@@ -138,6 +200,11 @@ def create_app() -> FastAPI:
     if console_dist:
         from fastapi.staticfiles import StaticFiles
         from fastapi.responses import FileResponse
+        from starlette.responses import RedirectResponse
+
+        @app.get("/")
+        async def root_redirect():
+            return RedirectResponse("/console/overview")
 
         # Mount static assets first (more specific route takes priority)
         app.mount("/console/assets", StaticFiles(directory=str(console_dist / "assets")), name="console-assets")
@@ -145,7 +212,9 @@ def create_app() -> FastAPI:
         @app.get("/console/{path:path}")
         @app.get("/console")
         async def console_spa(path: str = ""):
-            file = console_dist / path
+            file = (console_dist / path).resolve()
+            if not str(file).startswith(str(console_dist.resolve())):
+                return FileResponse(console_dist / "index.html")
             if file.is_file():
                 return FileResponse(file)
             return FileResponse(console_dist / "index.html")

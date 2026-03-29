@@ -125,7 +125,9 @@ class Annotation:
     annotation: Optional[str] = None
     stance: Optional[str] = None  # agree|disagree|uncertain|skip
     context: dict = field(default_factory=dict)
-    created_at: Optional[datetime] = None
+    created_at: datetime = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 @dataclass
@@ -138,13 +140,19 @@ class SearchResult:
 
 @dataclass
 class ThesisCoverage:
-    """Aggregated view of evidence for a thesis."""
+    """Aggregated view of evidence for a thesis, with trend."""
     thesis_name: str
     event_count: int = 0
     type_distribution: dict[str, int] = field(default_factory=dict)
     avg_confidence: float = 0.0
     latest_update: Optional[datetime] = None
     days_since_update: int = 0
+    # Trend fields (populated by thesis_coverage_with_trend)
+    recent_avg_confidence: Optional[float] = None
+    previous_avg_confidence: Optional[float] = None
+    confidence_delta: Optional[float] = None
+    trend_direction: str = "flat"  # up | down | flat | insufficient_data
+    recent_event_count: int = 0
 
 
 @dataclass
@@ -185,6 +193,7 @@ class PushNotification:
     title: str
     body: str
     related_event_ids: list[str] = field(default_factory=list)
+    signal_id: Optional[str] = None
     priority: str = "medium"  # high|medium|low
     workspace_id: str = "default"
     created_at: datetime = field(

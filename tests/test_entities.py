@@ -189,7 +189,7 @@ def test_annotation_defaults():
     assert ann.workspace_id == "default"
     assert ann.annotation is None
     assert ann.stance is None
-    assert ann.created_at is None
+    assert ann.created_at is not None
 
 
 def test_annotation_custom_stance():
@@ -391,3 +391,47 @@ class TestNotificationStateMachine:
     def test_all_terminal_states_have_no_transitions(self):
         for status in (NotificationStatus.ACKED, NotificationStatus.DISMISSED, NotificationStatus.FAILED):
             assert VALID_TRANSITIONS[status] == set()
+
+
+# ---------------------------------------------------------------------------
+# canonical_key unit tests
+# ---------------------------------------------------------------------------
+
+from cortex.domain.canonical import canonical_key
+
+
+class TestCanonicalKey:
+
+    def test_lowercase(self):
+        assert canonical_key("OpenAI") == "openai"
+
+    def test_strip_whitespace(self):
+        assert canonical_key("  NVIDIA  ") == "nvidia"
+
+    def test_hyphen_to_space(self):
+        assert canonical_key("Open-AI") == "open ai"
+
+    def test_underscore_to_space(self):
+        assert canonical_key("open_ai") == "open ai"
+
+    def test_corporate_suffix_inc(self):
+        assert canonical_key("Tesla, Inc.") == "tesla"
+
+    def test_corporate_suffix_ltd(self):
+        assert canonical_key("Huawei Ltd") == "huawei"
+
+    def test_corporate_suffix_corp(self):
+        assert canonical_key("NVIDIA Corp.") == "nvidia"
+
+    def test_fullwidth_chars(self):
+        # Fullwidth O -> normal O
+        assert canonical_key("\uff2f\uff50\uff45\uff4e\uff21\uff29") == "openai"
+
+    def test_empty_string(self):
+        assert canonical_key("") == ""
+
+    def test_already_canonical(self):
+        assert canonical_key("openai") == "openai"
+
+    def test_multiple_spaces_collapsed(self):
+        assert canonical_key("Sam   Altman") == "sam altman"

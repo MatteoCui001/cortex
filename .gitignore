@@ -1,9 +1,30 @@
+# Python
 __pycache__/
-*.pyc
-*.pyo
-.eggs/
+*.py[cod]
 *.egg-info/
 dist/
-build/
-.env
+.venv/
+.pytest_cache/
+
+# Node
+node_modules/
+
+# Local config (may contain secrets)
 config.local.yaml
+.env
+
+# File store
+.cortex/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Uploads (user content, not part of source)
+uploads/
+
+# Console build output (regenerated from source)
+console/dist/

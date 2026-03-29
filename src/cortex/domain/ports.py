@@ -105,6 +105,14 @@ class StoragePort(ABC):
         """Aggregate thesis coverage analysis."""
 
     @abstractmethod
+    async def thesis_trend(
+        self,
+        workspace_id: str = "default",
+        window_days: int = 14,
+    ) -> dict[str, dict]:
+        """Windowed thesis confidence trend (recent vs previous window)."""
+
+    @abstractmethod
     async def daily_events(
         self,
         target_date: date | None = None,
@@ -143,6 +151,16 @@ class StoragePort(ABC):
     @abstractmethod
     async def update_event_tags(self, event_id: str, tags: list[str]):
         """Update an event's tags."""
+
+    @abstractmethod
+    async def find_entity_by_name(
+        self, workspace_id: str, entity_type: str, name: str,
+    ) -> Optional[Entity]:
+        """Find an entity by exact name match. Returns None if not found."""
+
+    @abstractmethod
+    async def append_entity_alias(self, entity_id: str, alias: str) -> None:
+        """Add an alias to an entity's aliases list if not already present."""
 
     @abstractmethod
     async def get_all_entities(self, workspace_id: str = "default") -> list[dict]:
@@ -203,6 +221,22 @@ class StoragePort(ABC):
     # ------------------------------------------------------------------
     # Phase 3: Annotation operations
     # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def update_event_fields(
+        self,
+        event_id: str,
+        workspace_id: str,
+        *,
+        tags: list[str] | None = None,
+        thesis_links: list[str] | None = None,
+        title: str | None = None,
+    ) -> bool:
+        """Partial update of event fields. Returns True if event was found and updated."""
+
+    @abstractmethod
+    async def update_event_user_stance(self, event_id: str, user_stance: str) -> None:
+        """Update the user_stance field on an event."""
 
     @abstractmethod
     async def create_annotation(self, annotation) -> str:

@@ -16,6 +16,14 @@ RAW_INPUT_TYPES = frozenset(["text", "link", "audio", "image", "file", "video"])
 SOURCE_TYPES    = frozenset(SOURCE_WEIGHTS.keys())
 NATURE_TAGS     = frozenset(["claim", "fact", "method", "question", "intuition", "synthesis"])
 TEMPORALITIES   = frozenset(["permanent", "trend", "time_sensitive", "prediction"])
+
+# Default TTL (days) per temporality for expires_at calculation
+TEMPORALITY_TTL_DAYS: dict[str, int | None] = {
+    "permanent": None,      # never expires
+    "trend": 180,           # 6 months
+    "time_sensitive": 14,   # 2 weeks
+    "prediction": 90,       # 3 months
+}
 USER_STANCES    = frozenset(["agree", "disagree", "uncertain", "skip"])
 
 # Extended event types (Phase 3)

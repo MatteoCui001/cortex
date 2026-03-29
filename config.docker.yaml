@@ -1,0 +1,12 @@
+# Docker overlay config — mounted as config.local.yaml inside the container.
+# Overrides values in config.yaml for containerized deployment.
+
+storage:
+  postgres:
+    dsn: postgresql://cortex:cortex@db:5432/cortex
+
+api:
+  host: 0.0.0.0
+
+file_store:
+  root: /app/.cortex/store

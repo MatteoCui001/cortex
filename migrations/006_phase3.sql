@@ -1,8 +1,6 @@
 -- Phase 3: Information framework + annotations
 -- Adds three-dimension classification, key_points, stance, user reactions
 
-BEGIN;
-
 -- 1. Add new columns to events (all nullable with defaults)
 ALTER TABLE events
   ADD COLUMN IF NOT EXISTS raw_input_type   TEXT,
@@ -22,21 +20,29 @@ DO $$
 DECLARE
     con_name TEXT;
 BEGIN
-    SELECT conname INTO con_name
-    FROM pg_constraint
-    WHERE conrelid = 'events'::regclass
-      AND contype = 'c'
-      AND pg_get_constraintdef(oid) LIKE '%type%IN%';
-    IF con_name IS NOT NULL THEN
+    -- Find and drop any existing type check constraint
+    FOR con_name IN
+        SELECT conname
+        FROM pg_constraint
+        WHERE conrelid = 'events'::regclass
+          AND contype = 'c'
+          AND pg_get_constraintdef(oid) LIKE '%type%'
+    LOOP
         EXECUTE 'ALTER TABLE events DROP CONSTRAINT ' || con_name;
-    END IF;
-END $$;
+    END LOOP;
 
-ALTER TABLE events ADD CONSTRAINT events_type_check
-  CHECK (type IN (
-    'article','meeting','note','thesis','chat',
-    'voice_memo','image','document','video','agent_analysis'
-  ));
+    -- Add expanded type constraint
+    EXECUTE $sql$
+        ALTER TABLE events ADD CONSTRAINT events_type_check
+          CHECK (type IN (
+            'article','meeting','note','thesis','chat',
+            'voice_memo','image','document','video','agent_analysis'
+          ))
+    $sql$;
+EXCEPTION WHEN duplicate_object THEN
+    -- Constraint already exists with correct definition
+    NULL;
+END $$;
 
 -- 3. Create annotations table
 CREATE TABLE IF NOT EXISTS annotations (
@@ -62,5 +68,3 @@ CREATE INDEX IF NOT EXISTS idx_events_expires_at ON events(expires_at)
   WHERE expires_at IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_events_user_stance ON events(workspace_id, user_stance)
   WHERE user_stance IS NOT NULL;
-
-COMMIT;
