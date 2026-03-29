@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
-import { api, type Event, type SearchResult, type RelationRow } from "./api";
+import { useEffect, useState, useRef } from "react";
+import { api, type Event, type Signal, type SearchResult, type RelationRow, type Annotation } from "./api";
+import TypeLabel from "./components/TypeLabel";
 
 /* ── Types ── */
 export type DrawerTarget =
@@ -13,24 +14,6 @@ interface Props {
 }
 
 /* ── Shared small components ── */
-
-function TypeLabel({ type }: { type: string }) {
-  const map: Record<string, { color: string; bg: string }> = {
-    article: { color: "var(--type-article)", bg: "var(--type-article-bg)" },
-    note: { color: "var(--type-note)", bg: "var(--type-note-bg)" },
-    chat: { color: "var(--type-chat)", bg: "var(--type-chat-bg)" },
-    meeting: { color: "var(--type-meeting)", bg: "var(--type-meeting-bg)" },
-    thesis: { color: "var(--type-thesis)", bg: "var(--type-thesis-bg)" },
-    voice_memo: { color: "var(--type-voice)", bg: "var(--type-voice-bg)" },
-    document: { color: "var(--type-document)", bg: "var(--type-document-bg)" },
-  };
-  const s = map[type] ?? { color: "var(--text-tertiary)", bg: "var(--bg-elevated)" };
-  return (
-    <span className="text-[10px] font-medium px-1.5 py-0.5 rounded" style={{ color: s.color, background: s.bg }}>
-      {type}
-    </span>
-  );
-}
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -76,6 +59,238 @@ function RelationRow({ r }: { r: RelationRow }) {
   );
 }
 
+/* ── Editable chips ── */
+
+function EditableChips({
+  items,
+  onUpdate,
+  color,
+  bg,
+}: {
+  items: string[];
+  onUpdate: (items: string[]) => void;
+  color: string;
+  bg: string;
+}) {
+  const [adding, setAdding] = useState(false);
+  const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const remove = (item: string) => onUpdate(items.filter((i) => i !== item));
+  const add = () => {
+    const val = input.trim();
+    if (val && !items.includes(val)) {
+      onUpdate([...items, val]);
+    }
+    setInput("");
+    setAdding(false);
+  };
+
+  useEffect(() => {
+    if (adding) inputRef.current?.focus();
+  }, [adding]);
+
+  return (
+    <div className="flex flex-wrap gap-1 items-center">
+      {items.map((item) => (
+        <span
+          key={item}
+          className="text-[11px] px-2 py-0.5 rounded-full inline-flex items-center gap-1"
+          style={{ color, background: bg, border: "1px solid transparent" }}
+        >
+          {item}
+          <button
+            onClick={() => remove(item)}
+            className="opacity-50 hover:opacity-100 text-[10px] leading-none"
+          >
+            x
+          </button>
+        </span>
+      ))}
+      {adding ? (
+        <input
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false); }}
+          onBlur={add}
+          className="text-[11px] px-2 py-0.5 rounded-full outline-none w-24"
+          style={{ background: "var(--bg-elevated)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+          placeholder="add..."
+        />
+      ) : (
+        <button
+          onClick={() => setAdding(true)}
+          className="text-[11px] px-1.5 py-0.5 rounded-full opacity-40 hover:opacity-80 transition-opacity"
+          style={{ border: "1px dashed var(--border-subtle)", color: "var(--text-tertiary)" }}
+        >
+          +
+        </button>
+      )}
+    </div>
+  );
+}
+
+/* ── Annotation form ── */
+
+function AnnotationForm({ eventId, onSaved }: { eventId: string; onSaved: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [stance, setStance] = useState<string>("");
+  const [saving, setSaving] = useState(false);
+  const [annotations, setAnnotations] = useState<Annotation[]>([]);
+
+  useEffect(() => {
+    api.annotations(eventId).then(setAnnotations).catch(() => {});
+  }, [eventId]);
+
+  const submit = async () => {
+    if (!text.trim()) return;
+    setSaving(true);
+    try {
+      await api.annotate(eventId, text.trim(), stance || undefined);
+      setText("");
+      setStance("");
+      setOpen(false);
+      onSaved();
+      api.annotations(eventId).then(setAnnotations).catch(() => {});
+    } catch { /* ignore */ }
+    setSaving(false);
+  };
+
+  const stances = ["agree", "disagree", "uncertain", "skip"];
+
+  return (
+    <div className="mt-3">
+      {annotations.length > 0 && (
+        <div className="space-y-1.5 mb-3">
+          {annotations.map((a) => (
+            <div
+              key={a.id}
+              className="px-3 py-2 rounded-lg"
+              style={{ background: "rgba(165,180,252,0.04)", borderLeft: "2px solid var(--text-accent-dim)" }}
+            >
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-meta">{new Date(a.created_at).toLocaleDateString()}</span>
+                {a.stance && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: "var(--type-thesis)", background: "var(--type-thesis-bg)" }}>
+                    {a.stance}
+                  </span>
+                )}
+              </div>
+              {a.annotation && (
+                <div className="text-[12px]" style={{ color: "var(--text-accent)" }}>{a.annotation}</div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {!open ? (
+        <button
+          onClick={() => setOpen(true)}
+          className="text-[11px] px-3 py-1.5 rounded-lg transition-colors"
+          style={{ color: "var(--text-accent-dim)", border: "1px dashed var(--border-subtle)" }}
+          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--text-accent-dim)")}
+          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
+        >
+          Add note
+        </button>
+      ) : (
+        <div className="space-y-2">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder="Your thoughts on this event..."
+            rows={3}
+            className="w-full text-[12px] px-3 py-2 rounded-lg resize-none outline-none"
+            style={{ background: "var(--bg-elevated)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+          />
+          <div className="flex items-center gap-1.5">
+            {stances.map((s) => (
+              <button
+                key={s}
+                onClick={() => setStance(stance === s ? "" : s)}
+                className="text-[10px] px-2 py-0.5 rounded-full transition-colors"
+                style={{
+                  color: stance === s ? "var(--text-primary)" : "var(--text-tertiary)",
+                  background: stance === s ? "var(--bg-active)" : "var(--bg-elevated)",
+                  border: `1px solid ${stance === s ? "var(--border-default)" : "var(--border-subtle)"}`,
+                }}
+              >
+                {s}
+              </button>
+            ))}
+            <div className="flex-1" />
+            <button
+              onClick={() => { setOpen(false); setText(""); setStance(""); }}
+              className="text-[11px] px-2 py-1 rounded"
+              style={{ color: "var(--text-tertiary)" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={submit}
+              disabled={saving || !text.trim()}
+              className="text-[11px] px-3 py-1 rounded-lg font-medium transition-colors"
+              style={{
+                color: "var(--text-primary)",
+                background: "var(--bg-active)",
+                opacity: saving || !text.trim() ? 0.4 : 1,
+              }}
+            >
+              {saving ? "Saving..." : "Save"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ── Inline editable title ── */
+
+function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(value);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  const save = () => {
+    if (draft.trim() && draft.trim() !== value) onSave(draft.trim());
+    setEditing(false);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
+        onBlur={save}
+        className="text-[15px] font-medium w-full px-1 py-0.5 rounded outline-none"
+        style={{ color: "var(--text-primary)", background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}
+      />
+    );
+  }
+
+  return (
+    <div
+      onClick={() => { setDraft(value); setEditing(true); }}
+      className="text-[15px] font-medium cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors"
+      style={{ color: "var(--text-primary)" }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
+      onMouseLeave={(e) => (e.currentTarget.style.background = "")}
+      title="Click to edit"
+    >
+      {value || "\u2014"}
+    </div>
+  );
+}
+
 /* ── Main Drawer ── */
 
 export default function DetailDrawer({ target, onClose }: Props) {
@@ -83,6 +298,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
   const [related, setRelated] = useState<SearchResult[]>([]);
   const [relations, setRelations] = useState<RelationRow[]>([]);
   const [evidenceEvents, setEvidenceEvents] = useState<Event[]>([]);
+  const [linkedSignal, setLinkedSignal] = useState<Signal | null>(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -93,6 +309,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
     setRelated([]);
     setRelations([]);
     setEvidenceEvents([]);
+    setLinkedSignal(null);
 
     const eventId =
       target.kind === "event" ? target.id :
@@ -118,16 +335,42 @@ export default function DetailDrawer({ target, onClose }: Props) {
       );
     }
 
-    // For notifications — load related events
-    if (target.kind === "notification" && target.related_event_ids.length > 0) {
-      promises.push(
-        Promise.all(target.related_event_ids.map((id) => api.event(id).catch(() => null)))
-          .then((results) => setEvidenceEvents(results.filter(Boolean) as Event[]))
-      );
+    // For notifications — load related events and linked signal
+    if (target.kind === "notification") {
+      if (target.related_event_ids.length > 0) {
+        promises.push(
+          Promise.all(target.related_event_ids.map((id) => api.event(id).catch(() => null)))
+            .then((results) => setEvidenceEvents(results.filter(Boolean) as Event[]))
+        );
+      }
+      // Fetch the linked signal for context (why was this notification generated?)
+      if (target.signal_id) {
+        promises.push(
+          api.signals(100)
+            .then((sigs) => {
+              const match = sigs.find((s) => s.id === target.signal_id);
+              if (match) setLinkedSignal(match);
+            })
+            .catch(() => {})
+        );
+      }
     }
 
     Promise.all(promises).finally(() => setLoading(false));
   }, [target]);
+
+  const refreshEvent = () => {
+    if (!event) return;
+    api.event(event.id).then(setEvent).catch(() => {});
+  };
+
+  const handleUpdateField = async (fields: { tags?: string[]; thesis_links?: string[]; title?: string }) => {
+    if (!event) return;
+    try {
+      const updated = await api.updateEvent(event.id, fields);
+      setEvent(updated);
+    } catch { /* ignore */ }
+  };
 
   if (!target) return null;
 
@@ -184,21 +427,14 @@ export default function DetailDrawer({ target, onClose }: Props) {
                       <TypeLabel type={event.type} />
                       <span className="text-meta font-mono">{event.id.slice(0, 8)}</span>
                     </div>
-                    <div className="text-[15px] font-medium" style={{ color: "var(--text-primary)" }}>
-                      {event.title || "\u2014"}
-                    </div>
+                    <EditableTitle
+                      value={event.title || ""}
+                      onSave={(title) => handleUpdateField({ title })}
+                    />
                     {event.summary && (
                       <p className="text-body leading-relaxed">{event.summary}</p>
                     )}
-                    {event.user_annotation && (
-                      <div
-                        className="px-3 py-2 rounded-lg mt-2"
-                        style={{ background: "rgba(165,180,252,0.04)", borderLeft: "2px solid var(--text-accent-dim)" }}
-                      >
-                        <div className="text-meta mb-0.5">Your annotation</div>
-                        <div className="text-[13px]" style={{ color: "var(--text-accent)" }}>{event.user_annotation}</div>
-                      </div>
-                    )}
+                    <AnnotationForm eventId={event.id} onSaved={refreshEvent} />
                     <div className="flex items-center gap-3 text-meta mt-1">
                       <span>{new Date(event.created_at).toLocaleString()}</span>
                       {event.source && <span>{event.source}</span>}
@@ -207,20 +443,24 @@ export default function DetailDrawer({ target, onClose }: Props) {
                         <span style={{ color: "var(--status-medium)" }}>{event.temporality}</span>
                       )}
                     </div>
-                    {event.tags.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-2">
-                        {event.tags.map((t) => (
-                          <span key={t} className="text-[11px] px-2 py-0.5 rounded-full" style={{ color: "var(--text-tertiary)", background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}>{t}</span>
-                        ))}
-                      </div>
-                    )}
-                    {event.thesis_links.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {event.thesis_links.map((t) => (
-                          <span key={t} className="text-[11px] px-2 py-0.5 rounded" style={{ color: "var(--text-accent)", background: "rgba(165,180,252,0.08)" }}>{t}</span>
-                        ))}
-                      </div>
-                    )}
+                    <div className="mt-2">
+                      <div className="text-meta text-[10px] mb-1">Tags</div>
+                      <EditableChips
+                        items={event.tags}
+                        onUpdate={(tags) => handleUpdateField({ tags })}
+                        color="var(--text-tertiary)"
+                        bg="var(--bg-elevated)"
+                      />
+                    </div>
+                    <div className="mt-2">
+                      <div className="text-meta text-[10px] mb-1">Thesis Links</div>
+                      <EditableChips
+                        items={event.thesis_links}
+                        onUpdate={(thesis_links) => handleUpdateField({ thesis_links })}
+                        color="var(--text-accent)"
+                        bg="rgba(165,180,252,0.08)"
+                      />
+                    </div>
                     {event.source_path && (
                       <div className="mt-2">
                         {(event.source_path.startsWith("http") || event.source_path.startsWith("link:")) ? (
@@ -236,6 +476,52 @@ export default function DetailDrawer({ target, onClose }: Props) {
                         ) : (
                           <span className="text-meta font-mono break-all">{event.source_path}</span>
                         )}
+                      </div>
+                    )}
+                  </div>
+                </Section>
+              )}
+
+              {/* Signal context (for notifications linked to a signal) */}
+              {linkedSignal && (
+                <Section title="Why This Notification">
+                  <div className="space-y-2 px-3 py-2.5 rounded-lg" style={{ background: "var(--bg-elevated)" }}>
+                    <div className="flex items-center gap-2">
+                      <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
+                        style={{
+                          color: linkedSignal.signal_type === "contradiction" ? "var(--status-high)" :
+                                 linkedSignal.signal_type === "answer" ? "var(--status-success)" :
+                                 "var(--text-accent)",
+                          background: linkedSignal.signal_type === "contradiction" ? "rgba(248,113,113,0.1)" :
+                                      linkedSignal.signal_type === "answer" ? "rgba(74,222,128,0.1)" :
+                                      "rgba(165,180,252,0.08)",
+                        }}
+                      >
+                        {linkedSignal.signal_type}
+                      </span>
+                      {linkedSignal.evidence_strength && (
+                        <span className="text-meta">{linkedSignal.evidence_strength}</span>
+                      )}
+                      <span className="text-meta ml-auto">score: {linkedSignal.priority_score.toFixed(2)}</span>
+                    </div>
+                    {linkedSignal.topic && (
+                      <div className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+                        {linkedSignal.topic}
+                      </div>
+                    )}
+                    {linkedSignal.summary && (
+                      <p className="text-body text-[12px] leading-relaxed">{linkedSignal.summary}</p>
+                    )}
+                    {linkedSignal.rationale && (
+                      <p className="text-meta text-[11px] italic">{linkedSignal.rationale}</p>
+                    )}
+                    {linkedSignal.thesis_links.length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {linkedSignal.thesis_links.map((t) => (
+                          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded"
+                            style={{ color: "var(--text-accent)", background: "rgba(165,180,252,0.08)" }}
+                          >{t}</span>
+                        ))}
                       </div>
                     )}
                   </div>

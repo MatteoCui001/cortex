@@ -123,6 +123,8 @@ def main():
         asyncio.run(_cmd_maintain())
     elif command == "digest":
         asyncio.run(_cmd_digest())
+    elif command == "digest-push":
+        asyncio.run(_cmd_digest_push())
     elif command == "import-link":
         asyncio.run(_cmd_import_link())
     elif command == "import-file":
@@ -488,6 +490,28 @@ async def _cmd_digest():
 
 
 
+async def _cmd_digest_push():
+    """Generate today's digest and push it as a notification."""
+    days = 1
+    for i, arg in enumerate(sys.argv):
+        if arg == "--days" and i + 1 < len(sys.argv):
+            days = int(sys.argv[i + 1])
+
+    cfg = load_config()
+    storage, analyze = await _init_storage_only(cfg)
+    try:
+        from cortex.use_cases.digest_push import push_digest
+        notif = await push_digest(storage, analyze, workspace_id=cfg.get("workspace", "default"), days=days)
+        if notif:
+            print(f"Digest notification created: {notif.title}")
+            print(f"  ID: {notif.id}")
+            print(f"  Body length: {len(notif.body)} chars")
+        else:
+            print("No digest notification created (empty or already sent today).")
+    finally:
+        await storage.close()
+
+
 async def _cmd_import_link():
     if len(sys.argv) < 3:
         print("Usage: cortex import-link <url> [--annotation TEXT]")
@@ -532,7 +556,7 @@ async def _cmd_import_link():
             if event.key_points:
                 print(f"  Key points: {len(event.key_points)}")
             # Run contradiction detection
-            await _analyze_contradictions(ingest, event, storage)
+            await _analyze_contradictions(ingest, event, storage, cfg)
         else:
             print("Could not extract content from URL.")
     finally:
@@ -540,7 +564,7 @@ async def _cmd_import_link():
 
 
 
-async def _analyze_contradictions(ingest, event, storage):
+async def _analyze_contradictions(ingest, event, storage, cfg=None):
     """Run contradiction detection, persist signals, generate notifications."""
     signals = await ingest.post_ingest_analyze(event)
     if signals:
@@ -565,12 +589,16 @@ async def _analyze_contradictions(ingest, event, storage):
             from cortex.use_cases.notification_manager import NotificationManager
             workspace = ingest._workspace_id
             detector = PushDetector(storage, workspace)
-            manager = NotificationManager(storage, detector, workspace_id=workspace)
+            webhook_cfg = (cfg or {}).get("notifications", {}).get("webhook", {})
+            manager = NotificationManager(storage, detector, webhook_cfg=webhook_cfg, workspace_id=workspace)
             new_notifs = await manager.process(signals=signals)
             if new_notifs:
                 print(f"\n  {len(new_notifs)} new notification(s). Run 'cortex inbox' to view.")
         except Exception:
-            pass  # notification generation is best-effort
+            import logging
+            logging.getLogger(__name__).warning(
+                "Notification generation failed (best-effort)", exc_info=True,
+            )
     return signals
 
 
@@ -617,7 +645,7 @@ async def _cmd_import_file():
                 print(f"  Your stance: {event.user_stance}")
             if event.key_points:
                 print(f"  Key points: {len(event.key_points)}")
-            await _analyze_contradictions(ingest, event, storage)
+            await _analyze_contradictions(ingest, event, storage, cfg)
         else:
             print("Could not extract content from file.")
     finally:
@@ -779,7 +807,8 @@ async def _cmd_signals():
             # Generate persistent notifications from signals
             if signals:
                 from cortex.use_cases.notification_manager import NotificationManager
-                manager = NotificationManager(storage, push, workspace_id=workspace)
+                webhook_cfg = cfg.get("notifications", {}).get("webhook", {})
+                manager = NotificationManager(storage, push, webhook_cfg=webhook_cfg, workspace_id=workspace)
                 new_notifs = await manager.process(signals=signals)
                 if new_notifs:
                     print(f"  -> {len(new_notifs)} new notification(s). Run 'cortex inbox' to view.")
@@ -837,7 +866,8 @@ async def _cmd_inbox():
         from cortex.use_cases.notification_manager import NotificationManager
 
         detector = PushDetector(storage, workspace)
-        manager = NotificationManager(storage, detector, workspace_id=workspace)
+        webhook_cfg = cfg.get("notifications", {}).get("webhook", {})
+        manager = NotificationManager(storage, detector, webhook_cfg=webhook_cfg, workspace_id=workspace)
 
         # Parse subcommand: inbox [read|ack|dismiss] [id] [--status S] [--limit N]
         args = sys.argv[2:]

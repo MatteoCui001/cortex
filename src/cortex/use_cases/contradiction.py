@@ -5,12 +5,14 @@ Compares new events against existing knowledge to detect signals.
 from __future__ import annotations
 
 import json
+import logging
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from cortex.adapters.llm.classifier import is_weak_key_points
-from cortex.domain.constants import SIGNAL_TYPE_BASE_PRIORITY
+
+logger = logging.getLogger(__name__)
 from cortex.domain.entities import (
     ContradictionResult,
     KnowledgeEvent,
@@ -98,9 +100,10 @@ class ContradictionDetector:
             if result and result.signal_type != "redundant":
                 results.append(result)
 
-        # Dedup and score
+        # Dedup and score via dynamic value layer
         results = _dedup_signals(results)
-        results = _score_signals(results, new_event)
+        from cortex.use_cases.value_scorer import score_signals
+        results = score_signals(results, new_event)
 
         return results
 
@@ -138,6 +141,10 @@ class ContradictionDetector:
                 evidence_strength=data.get("evidence_strength"),
             )
         except Exception:
+            logger.warning(
+                "Signal classification failed: new=%s vs existing=%s",
+                new_event.id, existing_event.id, exc_info=True,
+            )
             return None
 
 
@@ -172,11 +179,17 @@ def _filter_candidates(
             and len(existing.content or "") < 100
         ):
             continue
-        # Stale time-sensitive events
+        # Stale time-sensitive events (legacy check by created_at)
         if (
             existing.temporality == "time_sensitive"
             and existing.created_at
             and existing.created_at < stale_cutoff
+        ):
+            continue
+        # Skip events past their expires_at (set by temporality TTL)
+        if (
+            getattr(existing, "expires_at", None)
+            and existing.expires_at < now
         ):
             continue
 
@@ -211,39 +224,6 @@ def _dedup_signals(
                 groups[key] = r
 
     return list(groups.values())
-
-
-def _stance_boost(event: KnowledgeEvent) -> float:
-    """User stance amplifies signal priority."""
-    stance = event.user_stance
-    if stance == "disagree":
-        return 0.15
-    if stance == "uncertain":
-        return 0.05
-    return 0.0
-
-
-def _score_signals(
-    results: list[ContradictionResult],
-    new_event: KnowledgeEvent,
-) -> list[ContradictionResult]:
-    """Compute priority_score and sort descending."""
-    thesis_boost = 0.1 if new_event.thesis_links else 0.0
-    sb = _stance_boost(new_event)
-    src_weight = new_event.source_weight or 0.5
-
-    for r in results:
-        base = SIGNAL_TYPE_BASE_PRIORITY.get(r.signal_type, 0.4)
-        r.priority_score = (
-            base * 0.45
-            + r.confidence * 0.30
-            + src_weight * 0.15
-            + thesis_boost
-            + sb
-        )
-
-    results.sort(key=lambda r: r.priority_score, reverse=True)
-    return results
 
 
 # ---------------------------------------------------------------------------

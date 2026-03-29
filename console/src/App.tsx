@@ -1,22 +1,34 @@
 import { Routes, Route, NavLink, Navigate } from "react-router-dom";
 import Overview from "./pages/Overview";
+import Digest from "./pages/Digest";
 import Inbox from "./pages/Inbox";
 import Signals from "./pages/Signals";
 import Events from "./pages/Events";
+import Search from "./pages/Search";
+import Graph from "./pages/Graph";
+import Ingest from "./pages/Ingest";
+import Theses from "./pages/Theses";
+import Settings from "./pages/Settings";
 
 const navItems = [
   { to: "/overview", label: "Overview", desc: "Dashboard" },
+  { to: "/digest", label: "Digest", desc: "Daily Brief" },
+  { to: "/theses", label: "Theses", desc: "Portfolio" },
   { to: "/inbox", label: "Inbox", desc: "Notifications" },
   { to: "/signals", label: "Signals", desc: "Insights" },
   { to: "/events", label: "Events", desc: "Knowledge" },
+  { to: "/graph", label: "Graph", desc: "Entity Map" },
+  { to: "/search", label: "Search", desc: "Find anything" },
+  { to: "/ingest", label: "Ingest", desc: "Add content" },
+  { to: "/settings", label: "Settings", desc: "Configuration" },
 ];
 
 export default function App() {
   return (
-    <div className="min-h-screen flex" style={{ background: "var(--bg-base)" }}>
-      {/* Sidebar */}
+    <div className="min-h-screen flex flex-col md:flex-row" style={{ background: "var(--bg-base)" }}>
+      {/* Sidebar — hidden on mobile */}
       <nav
-        className="w-52 shrink-0 flex flex-col border-r"
+        className="hidden md:flex w-52 shrink-0 flex-col border-r"
         style={{
           background: "var(--bg-base)",
           borderColor: "var(--border-subtle)",
@@ -86,17 +98,45 @@ export default function App() {
       </nav>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">
-        <div className="max-w-5xl mx-auto px-8 py-8">
+      <main className="flex-1 overflow-auto pb-16 md:pb-0">
+        <div className="max-w-5xl mx-auto px-4 py-4 md:px-8 md:py-8">
           <Routes>
             <Route path="/" element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<Overview />} />
+            <Route path="/digest" element={<Digest />} />
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/signals" element={<Signals />} />
             <Route path="/events" element={<Events />} />
+            <Route path="/graph" element={<Graph />} />
+            <Route path="/theses" element={<Theses />} />
+            <Route path="/search" element={<Search />} />
+            <Route path="/ingest" element={<Ingest />} />
+            <Route path="/settings" element={<Settings />} />
           </Routes>
         </div>
       </main>
+
+      {/* Mobile bottom tab bar */}
+      <nav
+        className="md:hidden fixed bottom-0 left-0 right-0 flex border-t z-50"
+        style={{
+          background: "var(--bg-base)",
+          borderColor: "var(--border-subtle)",
+        }}
+      >
+        {navItems.map((item) => (
+          <NavLink
+            key={item.to}
+            to={item.to}
+            className="flex-1 flex flex-col items-center py-2"
+            style={({ isActive }) => ({
+              color: isActive ? "var(--text-accent)" : "var(--text-quaternary)",
+            })}
+          >
+            <span className="text-[11px] font-medium">{item.label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

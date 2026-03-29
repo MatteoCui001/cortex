@@ -54,5 +54,10 @@ notifications:
     secret: ""                # HMAC-SHA256 signing secret
     min_priority: low         # low | medium | high
 
+  digest_push:
+    enabled: false            # set true to enable daily digest push
+    cron: "0 9 * * *"        # when to push (default: 9am daily)
+    days: 1                   # how many days of data to include
+
 file_store:
   root: ~/.cortex/store

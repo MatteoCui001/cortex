@@ -39,6 +39,7 @@ class FakeStorage(StoragePort):
 
     def __init__(self):
         self._events: dict[str, KnowledgeEvent] = {}
+        self._entities: dict[str, object] = {}
         self._annotations: list[Annotation] = []
         self._signals: list[ContradictionResult] = []
         self._signal_feedback: list[SignalFeedback] = []
@@ -69,7 +70,21 @@ class FakeStorage(StoragePort):
         return event.id
 
     async def insert_entity(self, entity) -> str:
+        self._entities[entity.id] = entity
         return entity.id
+
+    async def find_entity_by_name(self, workspace_id, entity_type, name):
+        etype = entity_type.value if hasattr(entity_type, "value") else entity_type
+        for e in self._entities.values():
+            et = e.type.value if hasattr(e.type, "value") else e.type
+            if e.workspace_id == workspace_id and et == etype and e.name == name:
+                return e
+        return None
+
+    async def append_entity_alias(self, entity_id, alias):
+        e = self._entities.get(entity_id)
+        if e and alias not in e.aliases:
+            e.aliases.append(alias)
 
     async def insert_relation(self, relation) -> str:
         return relation.id
@@ -103,20 +118,54 @@ class FakeStorage(StoragePort):
         return []
 
     async def stale_events(self, days=30, workspace_id="default") -> list[KnowledgeEvent]:
-        return []
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        return [
+            e for e in self._events.values()
+            if e.workspace_id == workspace_id
+            and e.updated_at
+            and e.updated_at < cutoff
+        ]
 
     async def thesis_coverage(self, workspace_id="default") -> list[ThesisCoverage]:
-        return []
+        thesis_map: dict[str, list] = {}
+        for e in self._events.values():
+            if e.workspace_id != workspace_id:
+                continue
+            for t in (e.thesis_links or []):
+                thesis_map.setdefault(t, []).append(e)
+        result = []
+        for thesis, events in thesis_map.items():
+            avg_conf = sum(e.confidence for e in events) / len(events) if events else 0
+            latest = max((e.updated_at for e in events if e.updated_at), default=None)
+            days_since = 0
+            if latest:
+                days_since = (datetime.now(timezone.utc) - latest).days
+            result.append(ThesisCoverage(
+                thesis_name=thesis,
+                event_count=len(events),
+                avg_confidence=avg_conf,
+                type_distribution={},
+                latest_update=latest,
+                days_since_update=days_since,
+            ))
+        return result
+
+    async def thesis_trend(self, workspace_id="default", window_days=14) -> dict:
+        return {}
 
     async def daily_events(self, target_date, workspace_id="default") -> list[KnowledgeEvent]:
         return []
 
     async def stats(self, workspace_id="default") -> dict:
+        type_dist: dict[str, int] = {}
+        for e in self._events.values():
+            type_dist[e.type] = type_dist.get(e.type, 0) + 1
         return {
-            "total_events": len(self._events),
-            "total_entities": 0,
-            "total_relations": 0,
-            "workspace": workspace_id,
+            "events": len(self._events),
+            "entities": len(self._entities),
+            "relations": 0,
+            "type_distribution": type_dist,
         }
 
     async def event_exists(self, source_path, workspace_id="default") -> bool:
@@ -142,6 +191,26 @@ class FakeStorage(StoragePort):
             events = [e for e in events if e.created_at and e.created_at >= cutoff]
         events.sort(key=lambda e: e.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         return events[offset:offset + limit]
+
+    async def update_event_fields(
+        self,
+        event_id: str,
+        workspace_id: str,
+        *,
+        tags=None,
+        thesis_links=None,
+        title=None,
+    ) -> bool:
+        ev = self._events.get(event_id)
+        if not ev or ev.workspace_id != workspace_id:
+            return False
+        if tags is not None:
+            ev.tags = tags
+        if thesis_links is not None:
+            ev.thesis_links = thesis_links
+        if title is not None:
+            ev.title = title
+        return True
 
     async def update_event_tags(self, event_id, tags):
         pass
@@ -175,6 +244,11 @@ class FakeStorage(StoragePort):
     async def create_annotation(self, annotation) -> str:
         self._annotations.append(annotation)
         return annotation.id
+
+    async def update_event_user_stance(self, event_id: str, user_stance: str):
+        e = self._events.get(event_id)
+        if e:
+            e.user_stance = user_stance
 
     async def get_annotations(self, workspace_id, target_type, target_id) -> list:
         return [
@@ -348,6 +422,84 @@ def _build_test_app(storage: FakeStorage, embedding: FakeEmbedding, llm: FakeLLM
     app.state.analyze = AnalyzeUseCase(storage, workspace)
 
     return app
+
+
+def _build_authed_test_app(
+    storage: FakeStorage, embedding: FakeEmbedding, llm: FakeLLM, token: str,
+) -> FastAPI:
+    """Create a test app with Bearer auth middleware enabled."""
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request as StarletteRequest
+    from starlette.responses import JSONResponse
+    import hmac
+
+    app = _build_test_app(storage, embedding, llm)
+
+    _PUBLIC_PATHS = frozenset({"/api/v1/health", "/api/v1/ready"})
+
+    class _TestAuthMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: StarletteRequest, call_next):
+            if request.url.path in _PUBLIC_PATHS:
+                return await call_next(request)
+            if not request.url.path.startswith("/api/"):
+                return await call_next(request)
+            auth = request.headers.get("authorization", "")
+            if hmac.compare_digest(auth, f"Bearer {token}"):
+                return await call_next(request)
+            return JSONResponse({"detail": "Unauthorized"}, status_code=401)
+
+    app.add_middleware(_TestAuthMiddleware)
+    return app
+
+
+@pytest.fixture()
+def authed_client(fake_storage, fake_embedding, fake_llm) -> tuple:
+    """Returns (client, token) where client has auth middleware enabled."""
+    token = "test-secret-token-12345"
+    app = _build_authed_test_app(fake_storage, fake_embedding, fake_llm, token)
+    return TestClient(app, raise_server_exceptions=True), token
+
+
+# ------------------------------------------------------------------
+# Shared test factories
+# ------------------------------------------------------------------
+
+def make_event(**kwargs) -> KnowledgeEvent:
+    """Create a KnowledgeEvent with sensible defaults; override any field via kwargs."""
+    defaults = dict(
+        id=str(uuid.uuid4()),
+        workspace_id="default",
+        type=EventType.NOTE,
+        title="Sample Event",
+        content="Sample content",
+        summary="Sample summary",
+        tags=["sample"],
+        thesis_links=[],
+        confidence=0.75,
+        source="api",
+        created_at=datetime.now(timezone.utc),
+        updated_at=datetime.now(timezone.utc),
+    )
+    defaults.update(kwargs)
+    return KnowledgeEvent(**defaults)
+
+
+def make_signal(**kwargs) -> ContradictionResult:
+    """Create a ContradictionResult with sensible defaults; override any field via kwargs."""
+    defaults = dict(
+        id=str(uuid.uuid4()),
+        workspace_id="default",
+        new_event_id=str(uuid.uuid4()),
+        existing_event_id=str(uuid.uuid4()),
+        signal_type="contradiction",
+        confidence=0.85,
+        explanation="Test signal",
+        topic="test-topic",
+        priority_score=0.7,
+        value_score=0.6,
+    )
+    defaults.update(kwargs)
+    return ContradictionResult(**defaults)
 
 
 @pytest.fixture()

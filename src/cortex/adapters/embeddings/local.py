@@ -1,14 +1,17 @@
 """Local embedding adapter using sentence-transformers.
 Falls back to n-gram hash if sentence-transformers is not installed."""
-
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import struct
+from concurrent.futures import ThreadPoolExecutor
+from typing import Optional
 
 from cortex.domain.ports import EmbeddingPort
 
 _model = None
+_executor = ThreadPoolExecutor(max_workers=2)
 
 
 class LocalEmbedding(EmbeddingPort):
@@ -23,11 +26,7 @@ class LocalEmbedding(EmbeddingPort):
 
     def _load_model(self):
         try:
-            import io
-            import logging
-            import os
-            import sys
-            import warnings
+            import os, sys, io, warnings, logging
 
             # Suppress HF Hub noise
             os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
@@ -42,7 +41,6 @@ class LocalEmbedding(EmbeddingPort):
 
             try:
                 from sentence_transformers import SentenceTransformer
-
                 self._st_model = SentenceTransformer(self._model_name)
                 self._dims = self._st_model.get_sentence_embedding_dimension()
             finally:
@@ -50,18 +48,30 @@ class LocalEmbedding(EmbeddingPort):
                 sys.stderr = old_stderr
                 logging.disable(logging.NOTSET)
         except ImportError:
+            import logging
+            logging.getLogger(__name__).warning(
+                "sentence-transformers not installed — using n-gram hash fallback. "
+                "Semantic search quality will be severely degraded. "
+                "Install with: pip install sentence-transformers"
+            )
             self._use_fallback = True
 
     async def embed(self, text: str) -> list[float]:
         if self._use_fallback:
             return _ngram_hash(text, self._dims)
-        result = self._st_model.encode(text, normalize_embeddings=True)
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(
+            _executor, self._st_model.encode, text, True,  # normalize_embeddings
+        )
         return result.tolist()
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         if self._use_fallback:
             return [_ngram_hash(t, self._dims) for t in texts]
-        results = self._st_model.encode(texts, normalize_embeddings=True, batch_size=32)
+        loop = asyncio.get_event_loop()
+        results = await loop.run_in_executor(
+            _executor, lambda: self._st_model.encode(texts, normalize_embeddings=True, batch_size=32),
+        )
         return [r.tolist() for r in results]
 
     @property
@@ -74,7 +84,7 @@ def _ngram_hash(text: str, dims: int, n: int = 3) -> list[float]:
     vec = [0.0] * dims
     text = text.lower().strip()
     for i in range(max(1, len(text) - n + 1)):
-        gram = text[i : i + n]
+        gram = text[i:i + n]
         h = hashlib.md5(gram.encode()).digest()
         idx = struct.unpack("<H", h[:2])[0] % dims
         val = struct.unpack("<f", h[4:8])[0]

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type Stats, type Notification, type Signal, type Event } from "../api";
 import { useNavigate } from "react-router-dom";
+import TypeLabel from "../components/TypeLabel";
 
 /* ── Shared small components ── */
 
@@ -40,26 +41,6 @@ function PriorityDot({ priority }: { priority: string }) {
   return <span className="inline-block w-1.5 h-1.5 rounded-full shrink-0 mt-[5px]" style={{ background: color }} />;
 }
 
-function TypeLabel({ type }: { type: string }) {
-  const map: Record<string, { color: string; bg: string }> = {
-    article: { color: "var(--type-article)", bg: "var(--type-article-bg)" },
-    note: { color: "var(--type-note)", bg: "var(--type-note-bg)" },
-    chat: { color: "var(--type-chat)", bg: "var(--type-chat-bg)" },
-    meeting: { color: "var(--type-meeting)", bg: "var(--type-meeting-bg)" },
-    thesis: { color: "var(--type-thesis)", bg: "var(--type-thesis-bg)" },
-    voice_memo: { color: "var(--type-voice)", bg: "var(--type-voice-bg)" },
-    document: { color: "var(--type-document)", bg: "var(--type-document-bg)" },
-  };
-  const s = map[type] ?? { color: "var(--text-tertiary)", bg: "var(--bg-elevated)" };
-  return (
-    <span
-      className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-      style={{ color: s.color, background: s.bg }}
-    >
-      {type}
-    </span>
-  );
-}
 
 function TypeBar({ distribution }: { distribution: Record<string, number> }) {
   const entries = Object.entries(distribution).sort((a, b) => b[1] - a[1]);
@@ -104,22 +85,28 @@ export default function Overview() {
   const [signals, setSignals] = useState<Signal[]>([]);
   const [recentEvents, setRecentEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     setLoading(true);
+    setError(null);
     Promise.all([
       api.stats().catch(() => null),
       api.notifications(undefined, 20).catch(() => []),
       api.signals(10).catch(() => []),
       api.events(10, 7).catch(() => []),
     ]).then(([s, n, sig, ev]) => {
+      if (!s && (n as unknown[]).length === 0 && (sig as unknown[]).length === 0 && (ev as unknown[]).length === 0) {
+        setError("Failed to load dashboard data");
+      }
       if (s) setStats(s);
       setNotifications(n as Notification[]);
       setSignals(sig as Signal[]);
       setRecentEvents(ev as Event[]);
-      setLoading(false);
-    });
+    }).catch((e) => {
+      setError(e.message || "Failed to load dashboard");
+    }).finally(() => setLoading(false));
   }, []);
 
   const activeNotifs = notifications.filter(n => n.status === "pending" || n.status === "delivered");
@@ -140,6 +127,15 @@ export default function Overview() {
         <h1 className="text-heading">Overview</h1>
         <p className="text-caption mt-1">What your knowledge system has been doing</p>
       </div>
+
+      {error && (
+        <div
+          className="text-[12px] py-3 px-4 rounded-lg mb-6"
+          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
+        >
+          {error}
+        </div>
+      )}
 
       {/* Metrics strip */}
       <div
@@ -212,7 +208,7 @@ export default function Overview() {
                 <div key={e.id} className="flex items-start gap-2.5 py-2 px-1">
                   <TypeLabel type={e.type} />
                   <div className="flex-1 min-w-0">
-                    <div className="text-[13px] truncate" style={{ color: "var(--text-primary)" }}>{e.title || "—"}</div>
+                    <div className="text-[13px] truncate" style={{ color: "var(--text-primary)" }}>{e.title || "\u2014"}</div>
                   </div>
                   <span className="text-meta shrink-0">{new Date(e.created_at).toLocaleDateString()}</span>
                 </div>
@@ -239,7 +235,7 @@ export default function Overview() {
                   {s.signal_type}
                 </span>
                 <div className="flex-1 min-w-0">
-                  <div className="text-[13px]" style={{ color: "var(--text-primary)" }}>{s.topic || s.summary || "—"}</div>
+                  <div className="text-[13px]" style={{ color: "var(--text-primary)" }}>{s.topic || s.summary || "\u2014"}</div>
                   {s.rationale && <div className="text-meta mt-0.5 line-clamp-1">{s.rationale}</div>}
                 </div>
                 <span className="text-meta shrink-0">{s.priority_score.toFixed(2)}</span>

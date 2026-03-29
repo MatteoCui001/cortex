@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, type Signal } from "../api";
 import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
 
@@ -24,14 +25,19 @@ function PriorityBar({ score }: { score: number }) {
 }
 
 export default function Signals() {
+  const navigate = useNavigate();
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [feedbackFor, setFeedbackFor] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
 
   useEffect(() => {
-    api.signals(100).then(setSignals).finally(() => setLoading(false));
+    api.signals(100)
+      .then(setSignals)
+      .catch((e) => setError(e.message || "Failed to load signals"))
+      .finally(() => setLoading(false));
   }, []);
 
   async function submitFeedback(signalId: string, verdict: string) {
@@ -50,9 +56,18 @@ export default function Signals() {
         <p className="text-caption mt-1">Connections and patterns detected across your knowledge</p>
       </div>
 
+      {error && (
+        <div
+          className="text-[12px] py-3 px-4 rounded-lg mb-4"
+          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
+        >
+          {error}
+        </div>
+      )}
+
       {loading ? (
         <div className="py-16 text-center text-body">Loading...</div>
-      ) : signals.length === 0 ? (
+      ) : signals.length === 0 && !error ? (
         <div
           className="rounded-xl p-12"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
@@ -126,9 +141,16 @@ export default function Signals() {
                   {s.thesis_links.length > 0 && (
                     <div className="flex gap-1.5 flex-wrap mb-2">
                       {s.thesis_links.map((t) => (
-                        <span key={t} className="text-[11px] px-2 py-0.5 rounded" style={{ color: "var(--text-accent)", background: "rgba(165,180,252,0.08)" }}>
+                        <button
+                          key={t}
+                          onClick={() => navigate(`/events?thesis=${encodeURIComponent(t)}`)}
+                          className="text-[11px] px-2 py-0.5 rounded transition-colors"
+                          style={{ color: "var(--text-accent)", background: "rgba(165,180,252,0.08)" }}
+                          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(165,180,252,0.16)")}
+                          onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(165,180,252,0.08)")}
+                        >
                           {t}
-                        </span>
+                        </button>
                       ))}
                     </div>
                   )}
@@ -137,7 +159,20 @@ export default function Signals() {
                     {new Date(s.created_at).toLocaleString()}
                     <span className="ml-2 font-mono">{s.id.slice(0, 7)}</span>
                     {s.evidence_event_ids.length > 0 && (
-                      <span className="ml-2">{s.evidence_event_ids.length} evidence event{s.evidence_event_ids.length > 1 ? "s" : ""}</span>
+                      <span className="ml-2">
+                        {s.evidence_event_ids.map((eid, i) => (
+                          <button
+                            key={eid}
+                            onClick={() => setDrawer({ kind: "event", id: eid })}
+                            className="font-mono transition-colors"
+                            style={{ color: "var(--text-accent-dim)" }}
+                            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-accent)")}
+                            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-accent-dim)")}
+                          >
+                            {i > 0 && ", "}{eid.slice(0, 7)}
+                          </button>
+                        ))}
+                      </span>
                     )}
                   </div>
                 </div>

@@ -1,7 +1,6 @@
 """
 File ingestion: extract text from PDF/DOCX/TXT, store original, ingest.
 """
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,6 +11,7 @@ from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
 
 
 class IngestFileUseCase:
+
     def __init__(
         self,
         storage: StoragePort,
@@ -58,8 +58,9 @@ class IngestFileUseCase:
         source_path = f"file:{path.name}"
 
         from cortex.use_cases.ingest import IngestUseCase
-
-        ingest = IngestUseCase(self._storage, self._embedding, self._llm, self._workspace_id)
+        ingest = IngestUseCase(
+            self._storage, self._embedding, self._llm, self._workspace_id
+        )
         event = await ingest.import_text(
             title=title,
             content=text,
@@ -90,6 +91,10 @@ def _extract_text(path: Path, ext: str) -> str:
     try:
         return path.read_text(encoding="utf-8", errors="replace")
     except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Failed to extract text from %s", path, exc_info=True,
+        )
         return ""
 
 
@@ -97,7 +102,6 @@ def _extract_pdf(path: Path) -> str:
     """Extract text from PDF using pymupdf or pdfplumber."""
     try:
         import fitz  # pymupdf
-
         doc = fitz.open(str(path))
         pages = []
         for page in doc:
@@ -109,7 +113,6 @@ def _extract_pdf(path: Path) -> str:
 
     try:
         import pdfplumber
-
         with pdfplumber.open(str(path)) as pdf:
             pages = [p.extract_text() or "" for p in pdf.pages]
         return "\n\n".join(pages)
@@ -123,7 +126,6 @@ def _extract_docx(path: Path) -> str:
     """Extract text from DOCX using python-docx."""
     try:
         from docx import Document
-
         doc = Document(str(path))
         paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
         return "\n\n".join(paragraphs)

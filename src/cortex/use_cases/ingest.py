@@ -1,7 +1,6 @@
 """
 Ingestion use case: parse -> extract metadata -> classify -> embed -> store.
 """
-
 from __future__ import annotations
 
 import hashlib
@@ -14,14 +13,16 @@ from typing import Optional
 
 import yaml
 
-from cortex.domain.constants import SOURCE_WEIGHTS
+from cortex.domain.canonical import canonical_key
+from cortex.domain.constants import SOURCE_WEIGHTS, TEMPORALITY_TTL_DAYS
+
+logger = logging.getLogger(__name__)
 from cortex.domain.entities import Entity, EntityType, EventType, KnowledgeEvent, Relation
 from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
 
-logger = logging.getLogger(__name__)
-
 
 class IngestUseCase:
+
     def __init__(
         self,
         storage: StoragePort,
@@ -52,7 +53,9 @@ class IngestUseCase:
         for i, md_file in enumerate(files):
             rel_path = str(md_file.relative_to(vault))
             try:
-                if skip_existing and await self._storage.event_exists(rel_path, self._workspace_id):
+                if skip_existing and await self._storage.event_exists(
+                    rel_path, self._workspace_id
+                ):
                     stats["skipped"] += 1
                     if on_progress:
                         on_progress(i + 1, stats["total"], rel_path, "skipped")
@@ -146,7 +149,6 @@ class IngestUseCase:
                 logger.warning("Stance parsing failed: %s", e)
         elif user_annotation:
             from cortex.domain.stance import parse_user_stance
-
             user_stance = parse_user_stance(user_annotation)
 
         # 4. Map event type
@@ -164,7 +166,16 @@ class IngestUseCase:
             content_hash = hashlib.sha256(content[:200].encode()).hexdigest()[:16]
             source_path = f"{raw_input_type}:{content_hash}"
 
-        # 7. Build event with all Phase 3 fields
+        # 7. Compute expires_at from temporality
+        temporality = classification.get("temporality")
+        expires_at = None
+        if temporality:
+            from datetime import timedelta
+            ttl_days = TEMPORALITY_TTL_DAYS.get(temporality)
+            if ttl_days is not None:
+                expires_at = datetime.now(timezone.utc) + timedelta(days=ttl_days)
+
+        # 8. Build event with all Phase 3 fields
         source_type = classification.get("source_type")
         event = KnowledgeEvent(
             id=str(uuid.uuid4()),
@@ -194,26 +205,27 @@ class IngestUseCase:
             source_type=source_type,
             source_weight=SOURCE_WEIGHTS.get(source_type, 0.5) if source_type else None,
             nature_tags=classification.get("nature_tags", []),
-            temporality=classification.get("temporality"),
+            temporality=temporality,
+            expires_at=expires_at,
             user_annotation=user_annotation,
             user_stance=user_stance,
         )
 
         event_id = await self._storage.insert_event(event)
 
-        # 8. Extract and store entities + relations
+        # 8. Extract and store entities + relations (with canonicalization + inline embedding)
         entities = metadata.get("entities", [])
         for ent_data in entities:
             ent_type = _map_entity_type(ent_data.get("type", "concept"))
-            entity = Entity(
-                id=str(uuid.uuid4()),
-                workspace_id=self._workspace_id,
-                type=ent_type,
-                name=ent_data.get("name", ""),
-            )
-            if not entity.name:
+            raw_name = ent_data.get("name", "").strip()
+            if not raw_name:
                 continue
-            entity_id = await self._storage.insert_entity(entity)
+
+            # Canonicalize: look up existing entity by canonical key
+            canon = canonical_key(raw_name)
+            entity_id = await self._resolve_or_create_entity(
+                ent_type, raw_name, canon,
+            )
 
             relation = Relation(
                 id=str(uuid.uuid4()),
@@ -229,17 +241,75 @@ class IngestUseCase:
 
         return event
 
+    async def _resolve_or_create_entity(
+        self, ent_type, raw_name: str, canon: str,
+    ) -> str:
+        """Find existing entity by canonical key, or create a new one.
+
+        Returns the entity id. Appends raw_name as alias if it differs from
+        the canonical entity's stored name.
+        """
+        etype_str = ent_type.value if hasattr(ent_type, "value") else ent_type
+
+        # Try to find an existing entity whose name matches the canonical key.
+        # We look up by the canonical form first (the stored name IS canonical).
+        existing = await self._storage.find_entity_by_name(
+            self._workspace_id, etype_str, canon,
+        )
+        # Also try exact raw_name match (backward compat with pre-canon data)
+        if not existing and raw_name != canon:
+            existing = await self._storage.find_entity_by_name(
+                self._workspace_id, etype_str, raw_name,
+            )
+
+        if existing:
+            # Append the raw name as alias if it's not the canonical name
+            if raw_name != existing.name and raw_name not in existing.aliases:
+                await self._storage.append_entity_alias(existing.id, raw_name)
+            return existing.id
+
+        # Create new entity with canonical name; raw_name saved as alias if different
+        aliases = [raw_name] if raw_name != canon else []
+        entity = Entity(
+            id=str(uuid.uuid4()),
+            workspace_id=self._workspace_id,
+            type=ent_type,
+            name=canon,
+            aliases=aliases,
+        )
+        # Generate embedding at ingest time; failure is non-blocking
+        try:
+            entity.embedding = await self._embedding.embed(canon)
+        except Exception:
+            logger.warning(
+                "Entity embedding failed for '%s', will need backfill",
+                canon, exc_info=True,
+            )
+        return await self._storage.insert_entity(entity)
+
     async def post_ingest_analyze(self, event: KnowledgeEvent) -> list:
         """Run contradiction detection on a newly ingested event. Returns signals."""
         if not self._llm:
             return []
         try:
             from cortex.use_cases.contradiction import ContradictionDetector
-
             detector = ContradictionDetector(self._storage, self._embedding, self._llm)
             results = await detector.analyze(event, workspace_id=self._workspace_id)
+
+            # Apply feedback-based priority adjustment
+            if results:
+                from cortex.use_cases.feedback_adjuster import (
+                    apply_feedback_multipliers,
+                    build_feedback_multipliers,
+                )
+                summary = await self._storage.get_feedback_summary(self._workspace_id)
+                if summary:
+                    multipliers = build_feedback_multipliers(summary)
+                    apply_feedback_multipliers(results, multipliers)
+
             return results
         except Exception:
+            logger.exception("post_ingest_analyze failed for event %s", event.id)
             return []
 
     async def sync_vault(
@@ -264,6 +334,9 @@ class IngestUseCase:
 
                 if rel_path in existing:
                     db_updated = datetime.fromisoformat(existing[rel_path])
+                    # Ensure timezone-aware comparison (DB may return naive timestamps)
+                    if db_updated.tzinfo is None:
+                        db_updated = db_updated.replace(tzinfo=timezone.utc)
                     if file_mtime <= db_updated:
                         stats["unchanged"] += 1
                         if on_progress:
@@ -307,7 +380,7 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
             fm = yaml.safe_load(match.group(1)) or {}
         except yaml.YAMLError:
             fm = {}
-        content = text[match.end() :]
+        content = text[match.end():]
     else:
         fm = {}
         content = text

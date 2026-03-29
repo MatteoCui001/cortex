@@ -1,64 +1,27 @@
 """
 User stance detection — pure domain logic, no adapter dependencies.
 """
-
 from __future__ import annotations
 
 from typing import Optional
 
+
 # Pattern-based stance detection (fast path, no LLM needed)
 _AGREE_PATTERNS = [
-    "有道理",
-    "认同",
-    "同意",
-    "对的",
-    "是的",
-    "没错",
-    "赞同",
-    "agree",
-    "yes",
-    "right",
-    "makes sense",
-    "correct",
-    "good point",
+    "有道理", "认同", "同意", "对的", "是的", "没错", "赞同",
+    "agree", "yes", "right", "makes sense", "correct", "good point",
 ]
 _DISAGREE_PATTERNS = [
-    "不对",
-    "扯淡",
-    "不认同",
-    "不同意",
-    "错",
-    "胡说",
-    "瞎说",
-    "disagree",
-    "no",
-    "wrong",
-    "bs",
-    "nonsense",
-    "incorrect",
+    "不对", "扯淡", "不认同", "不同意", "错", "胡说", "瞎说",
+    "disagree", "no", "wrong", "bs", "nonsense", "incorrect",
 ]
 _UNCERTAIN_PATTERNS = [
-    "存疑",
-    "不确定",
-    "留着看看",
-    "待验证",
-    "有待观察",
-    "再看看",
-    "uncertain",
-    "maybe",
-    "perhaps",
-    "not sure",
-    "questionable",
+    "存疑", "不确定", "留着看看", "待验证", "有待观察", "再看看",
+    "uncertain", "maybe", "perhaps", "not sure", "questionable",
 ]
 _SKIP_PATTERNS = [
-    "跳过",
-    "不关注",
-    "无所谓",
-    "略过",
-    "skip",
-    "pass",
-    "ignore",
-    "not relevant",
+    "跳过", "不关注", "无所谓", "略过",
+    "skip", "pass", "ignore", "not relevant",
 ]
 
 

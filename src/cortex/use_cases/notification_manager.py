@@ -3,10 +3,13 @@ NotificationManager: Orchestrates detection -> dedup -> persist -> webhook deliv
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from cortex.domain.entities import (
     ContradictionResult,
@@ -107,8 +110,6 @@ class NotificationManager:
         timeout = self._webhook_cfg.get("timeout_seconds", 5)
         secret = self._webhook_cfg.get("secret", "")
         headers = {"Content-Type": "application/json"}
-        if secret:
-            headers["X-Webhook-Secret"] = secret
         payload = {
             "id": notif.id,
             "title": notif.title,
@@ -116,11 +117,17 @@ class NotificationManager:
             "priority": notif.priority,
             "source_kind": notif.source_kind,
         }
+        if secret:
+            import hashlib, hmac, json
+            body_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+            sig = hmac.new(secret.encode(), body_bytes, hashlib.sha256).hexdigest()
+            headers["X-Webhook-Signature"] = f"sha256={sig}"
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
                 resp = await client.post(url, json=payload, headers=headers)
                 return 200 <= resp.status_code < 300
         except Exception:
+            logger.warning("Webhook delivery failed for notification %s", notif.id, exc_info=True)
             return False
 
     def _should_webhook(self, notif: Notification) -> bool:
@@ -155,5 +162,6 @@ class NotificationManager:
             dedup_key=dedup_key,
             priority=push.priority,
             related_event_ids=push.related_event_ids,
+            signal_id=push.signal_id,
             workspace_id=self._workspace_id,
         )
