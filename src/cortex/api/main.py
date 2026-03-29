@@ -3,10 +3,39 @@ FastAPI application factory.
 """
 from __future__ import annotations
 
+import os
 from contextlib import asynccontextmanager
 
 import yaml
 from fastapi import FastAPI
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import JSONResponse
+
+
+# ------------------------------------------------------------------
+# Bearer token authentication middleware
+# ------------------------------------------------------------------
+# Set CORTEX_API_TOKEN to require authentication on all /api/v1 routes
+# except /health and /ready.  When unset, auth is disabled (backwards compat).
+
+_API_TOKEN = os.environ.get("CORTEX_API_TOKEN", "")
+
+_PUBLIC_PATHS = frozenset({"/api/v1/health", "/api/v1/ready"})
+
+
+class _BearerAuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        if not _API_TOKEN:
+            return await call_next(request)
+        if request.url.path in _PUBLIC_PATHS:
+            return await call_next(request)
+        if not request.url.path.startswith("/api/"):
+            return await call_next(request)
+        auth = request.headers.get("authorization", "")
+        if auth == f"Bearer {_API_TOKEN}":
+            return await call_next(request)
+        return JSONResponse({"detail": "Unauthorized"}, status_code=401)
 
 from cortex.adapters.embeddings.local import LocalEmbedding
 from cortex.adapters.filestore.store import FileStore
@@ -83,6 +112,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.state.config = cfg
+
+    # Auth middleware (must be added before CORS so it runs after CORS preflight)
+    app.add_middleware(_BearerAuthMiddleware)
 
     # CORS — allow local console dev server
     from fastapi.middleware.cors import CORSMiddleware
