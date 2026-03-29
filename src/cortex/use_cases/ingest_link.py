@@ -4,11 +4,42 @@ Link ingestion: fetch URL content, extract text, store original, ingest.
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import re
+import socket
 from typing import Optional
 from urllib.parse import urlparse
 
 import httpx
+
+
+class SSRFError(ValueError):
+    """Raised when a URL targets a private/reserved network address."""
+
+
+def _validate_url_safe(url: str) -> None:
+    """Block URLs that resolve to private, loopback, or link-local addresses."""
+    parsed = urlparse(url)
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFError(f"Invalid URL: no hostname in {url!r}")
+
+    scheme = (parsed.scheme or "").lower()
+    if scheme not in ("http", "https"):
+        raise SSRFError(f"Blocked scheme: {scheme!r}")
+
+    # Resolve hostname to IP(s) and check each
+    try:
+        infos = socket.getaddrinfo(hostname, parsed.port or 443, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        raise SSRFError(f"Cannot resolve hostname: {hostname}")
+
+    for _family, _type, _proto, _canonname, sockaddr in infos:
+        ip = ipaddress.ip_address(sockaddr[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise SSRFError(
+                f"Blocked: {hostname} resolves to private/reserved address {ip}"
+            )
 
 from cortex.domain.entities import KnowledgeEvent
 from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
@@ -47,6 +78,8 @@ class IngestLinkUseCase:
         user_annotation: Optional[str] = None,
     ) -> Optional[KnowledgeEvent]:
         """Fetch a URL, extract text, and ingest as an event."""
+        _validate_url_safe(url)
+
         is_wechat = _is_wechat_article(url)
 
         # 1. Fetch content — WeChat needs browser-like headers
