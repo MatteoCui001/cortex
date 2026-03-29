@@ -387,16 +387,26 @@ class PostgresStorage(StoragePort):
 
     async def daily_events(
         self,
-        target_date: date,
+        target_date: date | None = None,
         workspace_id: str = "default",
     ) -> list[KnowledgeEvent]:
-        sql = """
-        SELECT * FROM events
-        WHERE workspace_id = $1
-          AND created_at::date = $2
-        ORDER BY created_at
-        """
-        rows = await self._pool.fetch(sql, workspace_id, target_date)
+        if target_date is None:
+            # No date filter: return most recent events
+            sql = """
+            SELECT * FROM events
+            WHERE workspace_id = $1
+            ORDER BY created_at DESC
+            LIMIT 50
+            """
+            rows = await self._pool.fetch(sql, workspace_id)
+        else:
+            sql = """
+            SELECT * FROM events
+            WHERE workspace_id = $1
+              AND created_at::date = $2
+            ORDER BY created_at
+            """
+            rows = await self._pool.fetch(sql, workspace_id, target_date)
         return [_row_to_event(row) for row in rows]
 
     async def stats(self, workspace_id: str = "default") -> dict:

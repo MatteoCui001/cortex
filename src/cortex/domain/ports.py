@@ -107,10 +107,10 @@ class StoragePort(ABC):
     @abstractmethod
     async def daily_events(
         self,
-        target_date: date,
+        target_date: date | None = None,
         workspace_id: str = "default",
     ) -> list[KnowledgeEvent]:
-        """Get all events for a specific date."""
+        """Get events for a specific date, or most recent if None."""
 
     @abstractmethod
     async def stats(self, workspace_id: str = "default") -> dict:
