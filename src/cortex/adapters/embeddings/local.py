@@ -61,7 +61,7 @@ class LocalEmbedding(EmbeddingPort):
             return _ngram_hash(text, self._dims)
         loop = asyncio.get_event_loop()
         result = await loop.run_in_executor(
-            _executor, self._st_model.encode, text, True,  # normalize_embeddings
+            _executor, lambda: self._st_model.encode(text, normalize_embeddings=True),
         )
         return result.tolist()
 
