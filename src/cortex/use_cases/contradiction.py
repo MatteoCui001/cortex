@@ -120,13 +120,17 @@ class ContradictionDetector:
             existing_points=existing_points,
         )
 
+        _VALID_TYPES = {"new_signal", "redundant", "contradiction", "answer", "bridge"}
         try:
             response = await self._llm.chat(prompt)
             data = _parse_json(response)
+            raw_type = data.get("signal_type", "new_signal")
+            if raw_type not in _VALID_TYPES:
+                return None  # LLM returned invalid type (e.g. "unrelated")
             return ContradictionResult(
                 new_event_id=new_event.id,
                 existing_event_id=existing_event.id,
-                signal_type=data.get("signal_type", "new_signal"),
+                signal_type=raw_type,
                 topic=data.get("topic"),
                 summary=data.get("summary"),
                 confidence=data.get("confidence", 0.5),
