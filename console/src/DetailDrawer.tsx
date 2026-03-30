@@ -28,10 +28,7 @@ function EventMiniCard({ event, onClick }: { event: Event; onClick?: () => void 
   return (
     <button
       onClick={onClick}
-      className="w-full text-left flex items-start gap-2.5 py-2 px-3 rounded-lg transition-colors"
-      style={{ background: "var(--bg-elevated)" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-hover)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
+      className="event-row w-full text-left flex items-start gap-2.5 py-2 px-3"
     >
       <TypeLabel type={event.type} />
       <div className="flex-1 min-w-0">
@@ -46,15 +43,15 @@ function EventMiniCard({ event, onClick }: { event: Event; onClick?: () => void 
   );
 }
 
-function RelationRow({ r }: { r: RelationRow }) {
+function RelationRowCard({ r }: { r: RelationRow }) {
   return (
     <div className="flex items-center gap-2 py-1.5 px-3 rounded-lg" style={{ background: "var(--bg-elevated)" }}>
       <span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>{r.source_name}</span>
-      <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: "var(--type-thesis)", background: "var(--type-thesis-bg)" }}>
+      <span className="thesis-chip text-[10px]">
         {r.relation}
       </span>
       <span className="text-[11px] font-medium" style={{ color: "var(--text-primary)" }}>{r.target_name}</span>
-      <span className="text-meta ml-auto">{r.confidence.toFixed(2)}</span>
+      <span className="text-meta ml-auto font-data">{r.confidence.toFixed(2)}</span>
     </div>
   );
 }
@@ -114,8 +111,7 @@ function EditableChips({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") add(); if (e.key === "Escape") setAdding(false); }}
           onBlur={add}
-          className="text-[11px] px-2 py-0.5 rounded-full outline-none w-24"
-          style={{ background: "var(--bg-elevated)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+          className="input-field text-[11px] px-2 py-0.5 rounded-full w-24"
           placeholder="add..."
         />
       ) : (
@@ -167,13 +163,12 @@ function AnnotationForm({ eventId, onSaved }: { eventId: string; onSaved: () => 
           {annotations.map((a) => (
             <div
               key={a.id}
-              className="px-3 py-2 rounded-lg"
-              style={{ background: "rgba(165,180,252,0.04)", borderLeft: "2px solid var(--text-accent-dim)" }}
+              className="annotation-block"
             >
               <div className="flex items-center gap-2 mb-0.5">
                 <span className="text-meta">{new Date(a.created_at).toLocaleDateString()}</span>
                 {a.stance && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded" style={{ color: "var(--type-thesis)", background: "var(--type-thesis-bg)" }}>
+                  <span className="thesis-chip text-[10px]">
                     {a.stance}
                   </span>
                 )}
@@ -188,10 +183,8 @@ function AnnotationForm({ eventId, onSaved }: { eventId: string; onSaved: () => 
       {!open ? (
         <button
           onClick={() => setOpen(true)}
-          className="text-[11px] px-3 py-1.5 rounded-lg transition-colors"
-          style={{ color: "var(--text-accent-dim)", border: "1px dashed var(--border-subtle)" }}
-          onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--text-accent-dim)")}
-          onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
+          className="btn-ghost text-[11px] px-3 py-1.5"
+          style={{ border: "1px dashed var(--border-subtle)" }}
         >
           Add note
         </button>
@@ -202,20 +195,15 @@ function AnnotationForm({ eventId, onSaved }: { eventId: string; onSaved: () => 
             onChange={(e) => setText(e.target.value)}
             placeholder="Your thoughts on this event..."
             rows={3}
-            className="w-full text-[12px] px-3 py-2 rounded-lg resize-none outline-none"
-            style={{ background: "var(--bg-elevated)", color: "var(--text-primary)", border: "1px solid var(--border-subtle)" }}
+            className="input-field w-full text-[12px] px-3 py-2 resize-none"
           />
           <div className="flex items-center gap-1.5">
             {stances.map((s) => (
               <button
                 key={s}
                 onClick={() => setStance(stance === s ? "" : s)}
-                className="text-[10px] px-2 py-0.5 rounded-full transition-colors"
-                style={{
-                  color: stance === s ? "var(--text-primary)" : "var(--text-tertiary)",
-                  background: stance === s ? "var(--bg-active)" : "var(--bg-elevated)",
-                  border: `1px solid ${stance === s ? "var(--border-default)" : "var(--border-subtle)"}`,
-                }}
+                className="segment-btn text-[10px] px-2 py-0.5 rounded-full"
+                data-active={stance === s ? "true" : undefined}
               >
                 {s}
               </button>
@@ -223,20 +211,15 @@ function AnnotationForm({ eventId, onSaved }: { eventId: string; onSaved: () => 
             <div className="flex-1" />
             <button
               onClick={() => { setOpen(false); setText(""); setStance(""); }}
-              className="text-[11px] px-2 py-1 rounded"
-              style={{ color: "var(--text-tertiary)" }}
+              className="btn-ghost text-[11px] px-2 py-1"
             >
               Cancel
             </button>
             <button
               onClick={submit}
               disabled={saving || !text.trim()}
-              className="text-[11px] px-3 py-1 rounded-lg font-medium transition-colors"
-              style={{
-                color: "var(--text-primary)",
-                background: "var(--bg-active)",
-                opacity: saving || !text.trim() ? 0.4 : 1,
-              }}
+              className="btn-primary text-[11px] px-3 py-1"
+              style={{ opacity: saving || !text.trim() ? 0.4 : 1 }}
             >
               {saving ? "Saving..." : "Save"}
             </button>
@@ -271,8 +254,7 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") { setDraft(value); setEditing(false); } }}
         onBlur={save}
-        className="text-[15px] font-medium w-full px-1 py-0.5 rounded outline-none"
-        style={{ color: "var(--text-primary)", background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}
+        className="input-field text-[15px] font-medium w-full px-1 py-0.5"
       />
     );
   }
@@ -280,10 +262,8 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
   return (
     <div
       onClick={() => { setDraft(value); setEditing(true); }}
-      className="text-[15px] font-medium cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors"
+      className="text-[15px] font-medium cursor-pointer rounded px-1 py-0.5 -mx-1 transition-colors hover:bg-[var(--bg-elevated)]"
       style={{ color: "var(--text-primary)" }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-elevated)")}
-      onMouseLeave={(e) => (e.currentTarget.style.background = "")}
       title="Click to edit"
     >
       {value || "\u2014"}
@@ -314,7 +294,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
     const eventId =
       target.kind === "event" ? target.id :
       target.kind === "signal" ? target.new_event_id :
-      null; // notification — use related_event_ids
+      null;
 
     const promises: Promise<void>[] = [];
 
@@ -326,7 +306,6 @@ export default function DetailDrawer({ target, onClose }: Props) {
       );
     }
 
-    // For signals — load evidence events
     if (target.kind === "signal") {
       const ids = [...new Set([target.new_event_id, target.existing_event_id, ...target.evidence_event_ids])];
       promises.push(
@@ -335,7 +314,6 @@ export default function DetailDrawer({ target, onClose }: Props) {
       );
     }
 
-    // For notifications — load related events and linked signal
     if (target.kind === "notification") {
       if (target.related_event_ids.length > 0) {
         promises.push(
@@ -343,7 +321,6 @@ export default function DetailDrawer({ target, onClose }: Props) {
             .then((results) => setEvidenceEvents(results.filter(Boolean) as Event[]))
         );
       }
-      // Fetch the linked signal for context (why was this notification generated?)
       if (target.signal_id) {
         promises.push(
           api.signals(100)
@@ -377,21 +354,10 @@ export default function DetailDrawer({ target, onClose }: Props) {
   return (
     <>
       {/* Backdrop */}
-      <div
-        className="fixed inset-0 z-40"
-        style={{ background: "rgba(0,0,0,0.4)" }}
-        onClick={onClose}
-      />
+      <div className="drawer-backdrop" onClick={onClose} />
 
       {/* Drawer */}
-      <div
-        className="fixed top-0 right-0 z-50 h-full w-[420px] max-w-[85vw] overflow-y-auto"
-        style={{
-          background: "var(--bg-surface)",
-          borderLeft: "1px solid var(--border-default)",
-          boxShadow: "-8px 0 32px rgba(0,0,0,0.3)",
-        }}
-      >
+      <div className="drawer-panel">
         {/* Header */}
         <div
           className="sticky top-0 z-10 flex items-center justify-between px-5 py-4 border-b"
@@ -404,10 +370,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
           </div>
           <button
             onClick={onClose}
-            className="text-[13px] px-2 py-1 rounded-md transition-colors"
-            style={{ color: "var(--text-tertiary)" }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "var(--text-primary)"; e.currentTarget.style.background = "var(--bg-elevated)"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "var(--text-tertiary)"; e.currentTarget.style.background = ""; }}
+            className="btn-ghost text-[13px] px-2 py-1"
           >
             Close
           </button>
@@ -416,7 +379,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
         {/* Content */}
         <div className="px-5 py-5">
           {loading ? (
-            <div className="py-12 text-center text-body">Loading context...</div>
+            <div className="py-12 text-center text-body" style={{ color: "var(--text-tertiary)" }}>Loading context...</div>
           ) : (
             <>
               {/* Primary event */}
@@ -425,7 +388,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
                   <div className="space-y-2">
                     <div className="flex items-center gap-2">
                       <TypeLabel type={event.type} />
-                      <span className="text-meta font-mono">{event.id.slice(0, 8)}</span>
+                      <span className="text-meta font-data">{event.id.slice(0, 8)}</span>
                     </div>
                     <EditableTitle
                       value={event.title || ""}
@@ -474,7 +437,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
                             {(event.source_path.startsWith("link:") ? event.source_path.slice(5) : event.source_path).replace(/^https?:\/\//, "").slice(0, 80)}
                           </a>
                         ) : (
-                          <span className="text-meta font-mono break-all">{event.source_path}</span>
+                          <span className="text-meta font-data break-all">{event.source_path}</span>
                         )}
                       </div>
                     )}
@@ -485,15 +448,15 @@ export default function DetailDrawer({ target, onClose }: Props) {
               {/* Signal context (for notifications linked to a signal) */}
               {linkedSignal && (
                 <Section title="Why This Notification">
-                  <div className="space-y-2 px-3 py-2.5 rounded-lg" style={{ background: "var(--bg-elevated)" }}>
+                  <div className="signal-card px-3 py-2.5">
                     <div className="flex items-center gap-2">
                       <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
                         style={{
                           color: linkedSignal.signal_type === "contradiction" ? "var(--status-high)" :
                                  linkedSignal.signal_type === "answer" ? "var(--status-success)" :
                                  "var(--text-accent)",
-                          background: linkedSignal.signal_type === "contradiction" ? "rgba(248,113,113,0.1)" :
-                                      linkedSignal.signal_type === "answer" ? "rgba(74,222,128,0.1)" :
+                          background: linkedSignal.signal_type === "contradiction" ? "var(--status-high-bg)" :
+                                      linkedSignal.signal_type === "answer" ? "var(--status-success-bg)" :
                                       "rgba(165,180,252,0.08)",
                         }}
                       >
@@ -502,25 +465,23 @@ export default function DetailDrawer({ target, onClose }: Props) {
                       {linkedSignal.evidence_strength && (
                         <span className="text-meta">{linkedSignal.evidence_strength}</span>
                       )}
-                      <span className="text-meta ml-auto">score: {linkedSignal.priority_score.toFixed(2)}</span>
+                      <span className="text-meta ml-auto font-data">score: {linkedSignal.priority_score.toFixed(2)}</span>
                     </div>
                     {linkedSignal.topic && (
-                      <div className="text-[12px] font-medium" style={{ color: "var(--text-primary)" }}>
+                      <div className="text-[12px] font-medium mt-2" style={{ color: "var(--text-primary)" }}>
                         {linkedSignal.topic}
                       </div>
                     )}
                     {linkedSignal.summary && (
-                      <p className="text-body text-[12px] leading-relaxed">{linkedSignal.summary}</p>
+                      <p className="text-body text-[12px] leading-relaxed mt-1">{linkedSignal.summary}</p>
                     )}
                     {linkedSignal.rationale && (
-                      <p className="text-meta text-[11px] italic">{linkedSignal.rationale}</p>
+                      <p className="text-meta text-[11px] italic mt-1">{linkedSignal.rationale}</p>
                     )}
                     {linkedSignal.thesis_links.length > 0 && (
-                      <div className="flex flex-wrap gap-1 mt-1">
+                      <div className="flex flex-wrap gap-1 mt-2">
                         {linkedSignal.thesis_links.map((t) => (
-                          <span key={t} className="text-[10px] px-1.5 py-0.5 rounded"
-                            style={{ color: "var(--text-accent)", background: "rgba(165,180,252,0.08)" }}
-                          >{t}</span>
+                          <span key={t} className="thesis-chip">{t}</span>
                         ))}
                       </div>
                     )}
@@ -555,7 +516,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
                 <Section title="Relations">
                   <div className="space-y-1">
                     {relations.slice(0, 15).map((r) => (
-                      <RelationRow key={r.id} r={r} />
+                      <RelationRowCard key={r.id} r={r} />
                     ))}
                     {relations.length > 15 && (
                       <div className="text-meta text-center py-1">

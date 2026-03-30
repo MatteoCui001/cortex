@@ -41,7 +41,6 @@ function simulate(nodes: GNode[], edges: GEdge[], width: number, height: number)
   const cy = height / 2;
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
-  // Repulsion between all pairs
   for (let i = 0; i < nodes.length; i++) {
     for (let j = i + 1; j < nodes.length; j++) {
       const a = nodes[i];
@@ -57,7 +56,6 @@ function simulate(nodes: GNode[], edges: GEdge[], width: number, height: number)
     }
   }
 
-  // Spring attraction along edges
   for (const e of edges) {
     const a = nodeMap.get(e.source);
     const b = nodeMap.get(e.target);
@@ -72,21 +70,18 @@ function simulate(nodes: GNode[], edges: GEdge[], width: number, height: number)
     if (!b.pinned) { b.vx -= dx; b.vy -= dy; }
   }
 
-  // Center gravity
   for (const n of nodes) {
     if (n.pinned) continue;
     n.vx += (cx - n.x) * 0.005;
     n.vy += (cy - n.y) * 0.005;
   }
 
-  // Apply velocity with damping
   for (const n of nodes) {
     if (n.pinned) continue;
     n.vx *= 0.8;
     n.vy *= 0.8;
     n.x += n.vx;
     n.y += n.vy;
-    // Keep in bounds
     n.x = Math.max(40, Math.min(width - 40, n.x));
     n.y = Math.max(40, Math.min(height - 40, n.y));
   }
@@ -105,7 +100,6 @@ function drawGraph(
   ctx.clearRect(0, 0, width, height);
   const nodeMap = new Map(nodes.map((n) => [n.id, n]));
 
-  // Draw edges
   for (const e of edges) {
     const a = nodeMap.get(e.source);
     const b = nodeMap.get(e.target);
@@ -118,18 +112,16 @@ function drawGraph(
     ctx.lineWidth = isHovered ? 1.5 : 1;
     ctx.stroke();
 
-    // Edge label
     if (isHovered) {
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2;
-      ctx.font = "10px system-ui";
+      ctx.font = "10px 'JetBrains Mono', monospace";
       ctx.fillStyle = "rgba(148,163,184,0.6)";
       ctx.textAlign = "center";
       ctx.fillText(e.relation, mx, my - 4);
     }
   }
 
-  // Draw nodes
   for (const n of nodes) {
     const isHovered = hoveredId === n.id;
     const r = isHovered ? 8 : 6;
@@ -140,8 +132,7 @@ function drawGraph(
     ctx.fillStyle = isHovered ? c : c + "99";
     ctx.fill();
 
-    // Label
-    ctx.font = isHovered ? "bold 12px system-ui" : "11px system-ui";
+    ctx.font = isHovered ? "bold 12px 'Instrument Sans', sans-serif" : "11px 'Instrument Sans', sans-serif";
     ctx.fillStyle = isHovered ? "#e2e8f0" : "#94a3b8";
     ctx.textAlign = "center";
     ctx.fillText(n.label, n.x, n.y - r - 4);
@@ -163,7 +154,6 @@ export default function Graph() {
   const [selectedEntity, setSelectedEntity] = useState<EntityResult | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // Search entities
   async function searchEntities(q: string) {
     if (!q.trim()) { setEntityResults([]); return; }
     try {
@@ -174,7 +164,6 @@ export default function Graph() {
     }
   }
 
-  // Load graph for an entity
   const loadGraph = useCallback(async (entity: EntityResult) => {
     setSelectedEntity(entity);
     setEntityResults([]);
@@ -198,7 +187,6 @@ export default function Graph() {
     const cx = w / 2;
     const cy = h / 2;
 
-    // Center node
     nodeSet.set(center.id, {
       id: center.id,
       label: center.name,
@@ -210,7 +198,6 @@ export default function Graph() {
       pinned: true,
     });
 
-    // Add relation nodes
     for (const r of relations) {
       if (!nodeSet.has(r.source_id)) {
         nodeSet.set(r.source_id, {
@@ -247,7 +234,6 @@ export default function Graph() {
     edgesRef.current = edges;
   }
 
-  // Animation loop
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -267,7 +253,6 @@ export default function Graph() {
     return () => cancelAnimationFrame(animRef.current);
   }, []);
 
-  // Resize canvas
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -283,7 +268,6 @@ export default function Graph() {
     return () => ro.disconnect();
   }, []);
 
-  // Mouse hover detection
   function handleMouseMove(e: React.MouseEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -294,7 +278,7 @@ export default function Graph() {
     for (const n of nodesRef.current) {
       const dx = n.x - mx;
       const dy = n.y - my;
-      if (dx * dx + dy * dy < 144) { // 12px radius
+      if (dx * dx + dy * dy < 144) {
         found = n.id;
         break;
       }
@@ -303,7 +287,6 @@ export default function Graph() {
     canvas.style.cursor = found ? "pointer" : "default";
   }
 
-  // Click on node → load its graph
   function handleClick(e: React.MouseEvent<HTMLCanvasElement>) {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -322,10 +305,10 @@ export default function Graph() {
 
   return (
     <div className="flex flex-col" style={{ height: "calc(100vh - 120px)" }}>
-      <div className="flex flex-col md:flex-row md:items-baseline justify-between mb-4 gap-2">
+      <div className="flex flex-col md:flex-row md:items-baseline justify-between mb-4 gap-2 animate-in">
         <div>
-          <h1 className="text-heading" style={{ color: "var(--text-primary)" }}>Entity Graph</h1>
-          <p className="text-meta mt-1">Explore relationships between entities</p>
+          <h1 className="text-heading">Entity Graph</h1>
+          <p className="text-caption mt-1">Explore relationships between entities</p>
         </div>
 
         {/* Legend */}
@@ -340,40 +323,30 @@ export default function Graph() {
       </div>
 
       {/* Search bar */}
-      <div className="relative mb-4">
+      <div className="relative mb-4 animate-in animate-in-delay-1">
         <input
           type="text"
           value={query}
           onChange={(e) => { setQuery(e.target.value); searchEntities(e.target.value); }}
           placeholder="Search for an entity to visualize..."
-          className="w-full text-[13px] px-4 py-2.5 rounded-lg outline-none transition-colors"
-          style={{
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-default)",
-            color: "var(--text-primary)",
-          }}
-          onFocus={(e) => (e.currentTarget.style.borderColor = "var(--text-accent)")}
-          onBlur={(e) => setTimeout(() => { e.target.style.borderColor = "var(--border-default)"; setEntityResults([]); }, 200)}
+          className="input-field w-full text-[13px] px-4 py-2.5"
         />
 
         {/* Dropdown results */}
         {entityResults.length > 0 && (
           <div
-            className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-10 shadow-lg"
-            style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-default)" }}
+            className="absolute top-full left-0 right-0 mt-1 rounded-lg overflow-hidden z-10"
+            style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-default)", boxShadow: "0 8px 32px rgba(0,0,0,0.3)" }}
           >
             {entityResults.map((ent) => (
               <button
                 key={ent.id}
                 onMouseDown={() => { setQuery(ent.name); loadGraph(ent); }}
-                className="w-full text-left px-4 py-2.5 transition-colors flex items-center justify-between"
-                style={{ color: "var(--text-primary)" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "var(--bg-active)")}
-                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
+                className="search-result w-full text-left px-4 py-2.5 flex items-center justify-between"
               >
                 <div className="flex items-center gap-2">
                   <div className="w-2 h-2 rounded-full" style={{ background: colorFor(ent.type) }} />
-                  <span className="text-[13px]">{ent.name}</span>
+                  <span className="text-[13px]" style={{ color: "var(--text-primary)" }}>{ent.name}</span>
                   <span className="text-[10px]" style={{ color: "var(--text-tertiary)" }}>{ent.type}</span>
                 </div>
                 <span className="text-meta text-[10px]">{ent.mention_count} mentions</span>
@@ -394,14 +367,14 @@ export default function Graph() {
       {error && (
         <div
           className="text-[12px] py-3 px-4 rounded-lg mb-4"
-          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
+          style={{ background: "var(--status-high-bg)", color: "var(--status-high)" }}
         >
           {error}
         </div>
       )}
 
       {loading && (
-        <div className="py-16 text-center text-body">Loading graph...</div>
+        <div className="py-16 text-center text-body" style={{ color: "var(--text-tertiary)" }}>Loading graph...</div>
       )}
 
       {/* Canvas */}
