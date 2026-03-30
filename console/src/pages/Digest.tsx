@@ -54,19 +54,8 @@ function SectionCard({
   empty?: string;
 }) {
   return (
-    <div
-      className="rounded-xl p-5"
-      style={{
-        background: "var(--bg-surface)",
-        border: "1px solid var(--border-subtle)",
-      }}
-    >
-      <h3
-        className="text-[13px] font-semibold mb-3"
-        style={{ color: "var(--text-secondary)" }}
-      >
-        {title}
-      </h3>
+    <div className="card p-5">
+      <h3 className="text-subheading mb-3">{title}</h3>
       {children}
       {empty && (
         <div className="text-meta text-[12px] py-2">{empty}</div>
@@ -78,13 +67,13 @@ function SectionCard({
 function TrendArrow({ direction }: { direction: string }) {
   if (direction === "up")
     return (
-      <span style={{ color: "var(--status-up, #4ade80)" }} className="font-semibold">
+      <span style={{ color: "var(--status-success)" }} className="font-semibold">
         ↑
       </span>
     );
   if (direction === "down")
     return (
-      <span style={{ color: "var(--status-high, #f87171)" }} className="font-semibold">
+      <span style={{ color: "var(--status-high)" }} className="font-semibold">
         ↓
       </span>
     );
@@ -95,13 +84,13 @@ function ConfBadge({ value }: { value: number }) {
   const pct = Math.round(value * 100);
   const color =
     pct >= 90
-      ? "var(--status-up, #4ade80)"
+      ? "var(--status-success)"
       : pct >= 80
         ? "var(--text-accent)"
         : "var(--text-tertiary)";
   return (
     <span
-      className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+      className="text-[10px] font-medium font-data px-1.5 py-0.5 rounded"
       style={{ color, background: "var(--bg-elevated)" }}
     >
       {pct}%
@@ -141,30 +130,18 @@ export default function Digest() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-baseline justify-between mb-6">
+      <div className="flex items-baseline justify-between mb-6 animate-in">
         <div>
-          <h1
-            className="text-heading"
-            style={{ color: "var(--text-primary)" }}
-          >
-            Research Digest
-          </h1>
-          <p className="text-meta mt-1">What deserves your attention</p>
+          <h1 className="text-heading">Research Digest</h1>
+          <p className="text-caption mt-1">What deserves your attention</p>
         </div>
-        <div className="flex gap-1">
+        <div className="segment-control">
           {[1, 7, 14, 30].map((d) => (
             <button
               key={d}
               onClick={() => setDays(d)}
-              className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
-              style={{
-                background:
-                  days === d ? "var(--bg-active)" : "transparent",
-                color:
-                  days === d
-                    ? "var(--text-primary)"
-                    : "var(--text-tertiary)",
-              }}
+              className="segment-btn"
+              data-active={days === d ? "true" : undefined}
             >
               {d}d
             </button>
@@ -173,31 +150,22 @@ export default function Digest() {
       </div>
 
       {loading && (
-        <div className="text-meta py-12 text-center">Loading digest...</div>
+        <div className="text-body py-12 text-center" style={{ color: "var(--text-tertiary)" }}>Loading digest...</div>
       )}
       {error && (
         <div
-          className="text-[12px] py-4 px-4 rounded-lg mb-4"
-          style={{
-            background: "var(--bg-elevated)",
-            color: "var(--status-high, #f87171)",
-          }}
+          className="text-[12px] py-3 px-4 rounded-lg mb-4"
+          style={{ background: "var(--status-high-bg)", color: "var(--status-high)" }}
         >
           Failed to load digest: {error}
         </div>
       )}
 
       {data && !loading && (
-        <div className="flex flex-col gap-5">
+        <div className="flex flex-col gap-5 animate-in animate-in-delay-1">
           {/* 1. Narrative */}
           {data.narrative && (
-            <div
-              className="rounded-xl p-5"
-              style={{
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--border-subtle)",
-              }}
-            >
+            <div className="card-glow p-5">
               <div
                 className="text-[13px] leading-relaxed whitespace-pre-line"
                 style={{ color: "var(--text-primary)" }}
@@ -227,10 +195,7 @@ export default function Digest() {
                       <TrendArrow direction={t.trend_direction} />
                       <button
                         onClick={() => navigate(`/events?thesis=${encodeURIComponent(t.thesis)}`)}
-                        className="text-[13px] font-medium transition-colors"
-                        style={{ color: "var(--text-primary)" }}
-                        onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-accent)")}
-                        onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-primary)")}
+                        className="thesis-chip"
                       >
                         {t.thesis}
                       </button>
@@ -238,12 +203,12 @@ export default function Digest() {
                     <div className="flex items-center gap-3">
                       {t.confidence_delta !== null && (
                         <span
-                          className="text-[11px] font-mono"
+                          className="text-[11px] font-data"
                           style={{
                             color:
                               t.confidence_delta > 0
-                                ? "var(--status-up, #4ade80)"
-                                : "var(--status-high, #f87171)",
+                                ? "var(--status-success)"
+                                : "var(--status-high)",
                           }}
                         >
                           {t.confidence_delta > 0 ? "+" : ""}
@@ -279,20 +244,13 @@ export default function Digest() {
                     <div className="flex-1 min-w-0">
                       <button
                         onClick={() => setDrawer({ kind: "event", id: e.id })}
-                        className="text-[13px] truncate text-left transition-colors block"
-                        style={{ color: "var(--text-primary)" }}
-                        onMouseEnter={(ev) => (ev.currentTarget.style.color = "var(--text-accent)")}
-                        onMouseLeave={(ev) => (ev.currentTarget.style.color = "var(--text-primary)")}
+                        className="btn-ghost text-[13px] truncate text-left block px-2 py-0.5 -mx-2"
                       >
                         {e.title}
                       </button>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span
-                          className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                          style={{
-                            color: "var(--text-tertiary)",
-                            background: "var(--bg-elevated)",
-                          }}
+                          className="chip"
                         >
                           {e.type}
                         </span>
@@ -327,7 +285,7 @@ export default function Digest() {
                     >
                       <div className="flex items-center gap-2">
                         <span
-                          className="text-[10px] font-mono w-4 text-right"
+                          className="text-[10px] font-data w-4 text-right"
                           style={{ color: "var(--text-quaternary)" }}
                         >
                           {i + 1}
@@ -373,8 +331,8 @@ export default function Digest() {
                       <span
                         className="text-[10px] font-medium px-1.5 py-0.5 rounded"
                         style={{
-                          color: "var(--status-high, #f87171)",
-                          background: "var(--bg-elevated)",
+                          color: "var(--status-high)",
+                          background: "var(--status-high-bg)",
                         }}
                       >
                         {t.days_since_update}d stale
