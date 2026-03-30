@@ -87,7 +87,8 @@ def _ngram_hash(text: str, dims: int, n: int = 3) -> list[float]:
         gram = text[i:i + n]
         h = hashlib.md5(gram.encode()).digest()
         idx = struct.unpack("<H", h[:2])[0] % dims
-        val = struct.unpack("<f", h[4:8])[0]
+        # Use integer hash mapped to [-1, 1] range (avoid raw float decode overflow)
+        val = (struct.unpack("<I", h[4:8])[0] / 2147483648.0) - 1.0
         vec[idx] += val
     norm = sum(x * x for x in vec) ** 0.5
     if norm > 0:
