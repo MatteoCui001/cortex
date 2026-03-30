@@ -209,14 +209,23 @@ def create_app() -> FastAPI:
         # Mount static assets first (more specific route takes priority)
         app.mount("/console/assets", StaticFiles(directory=str(console_dist / "assets")), name="console-assets")
 
+        def _serve_index():
+            """Return index.html with API token injected for same-origin Console."""
+            from starlette.responses import HTMLResponse
+            html = (console_dist / "index.html").read_text()
+            if _API_TOKEN:
+                inject = f'<script>window.__CORTEX_TOKEN__="{_API_TOKEN}";</script>'
+                html = html.replace("</head>", f"{inject}</head>", 1)
+            return HTMLResponse(html)
+
         @app.get("/console/{path:path}")
         @app.get("/console")
         async def console_spa(path: str = ""):
             file = (console_dist / path).resolve()
             if not str(file).startswith(str(console_dist.resolve())):
-                return FileResponse(console_dist / "index.html")
+                return _serve_index()
             if file.is_file():
                 return FileResponse(file)
-            return FileResponse(console_dist / "index.html")
+            return _serve_index()
 
     return app
