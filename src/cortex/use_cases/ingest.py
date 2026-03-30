@@ -119,18 +119,23 @@ class IngestUseCase:
         """Import raw text with full Phase 3 classification pipeline."""
         frontmatter = _frontmatter or {}
 
-        # 1. Extract metadata via LLM
+        # 1. Extract metadata via LLM (graceful fallback if LLM fails)
+        _fallback_metadata = {
+            "summary": content[:200].replace("\n", " "),
+            "tags": list(frontmatter.get("tags", [])) if frontmatter.get("tags") else [],
+            "entities": [],
+            "thesis_links": [],
+            "confidence": 0.5,
+            "event_type": event_type,
+        }
         if self._llm:
-            metadata = await self._llm.extract_metadata(content)
+            try:
+                metadata = await self._llm.extract_metadata(content)
+            except Exception as e:
+                logger.warning("LLM metadata extraction failed, using fallback: %s", e)
+                metadata = _fallback_metadata
         else:
-            metadata = {
-                "summary": content[:200].replace("\n", " "),
-                "tags": list(frontmatter.get("tags", [])) if frontmatter.get("tags") else [],
-                "entities": [],
-                "thesis_links": [],
-                "confidence": 0.5,
-                "event_type": event_type,
-            }
+            metadata = _fallback_metadata
 
         # 2. Classify three dimensions via LLM
         classification = {}
