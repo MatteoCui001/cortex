@@ -7,14 +7,14 @@ import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
 function TrendBadge({ direction, delta }: { direction: string; delta: number | null }) {
   if (direction === "up") {
     return (
-      <span className="text-[11px] font-medium" style={{ color: "var(--status-up, #4ade80)" }}>
+      <span className="text-[11px] font-medium" style={{ color: "var(--status-success)" }}>
         {delta !== null ? `+${(delta * 100).toFixed(1)}%` : "up"}
       </span>
     );
   }
   if (direction === "down") {
     return (
-      <span className="text-[11px] font-medium" style={{ color: "var(--status-high, #f87171)" }}>
+      <span className="text-[11px] font-medium" style={{ color: "var(--status-high)" }}>
         {delta !== null ? `${(delta * 100).toFixed(1)}%` : "down"}
       </span>
     );
@@ -24,13 +24,13 @@ function TrendBadge({ direction, delta }: { direction: string; delta: number | n
 
 function ConfBar({ value }: { value: number }) {
   const pct = Math.round(value * 100);
-  const color = pct >= 70 ? "var(--status-up, #4ade80)" : pct >= 40 ? "var(--text-accent)" : "var(--text-tertiary)";
+  const color = pct >= 70 ? "var(--status-success)" : pct >= 40 ? "var(--text-accent)" : "var(--text-tertiary)";
   return (
     <div className="flex items-center gap-2">
-      <div className="w-20 h-1.5 rounded-full overflow-hidden" style={{ background: "var(--bg-active)" }}>
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color, opacity: 0.7 }} />
+      <div className="progress-track w-20">
+        <div className="progress-fill" style={{ width: `${pct}%`, background: color, opacity: 0.7 }} />
       </div>
-      <span className="text-[11px] font-mono" style={{ color }}>{pct}%</span>
+      <span className="text-[11px] font-data" style={{ color }}>{pct}%</span>
     </div>
   );
 }
@@ -43,11 +43,7 @@ function TypeDistribution({ dist }: { dist: Record<string, number> }) {
       {Object.entries(dist)
         .sort((a, b) => b[1] - a[1])
         .map(([type, count]) => (
-          <span
-            key={type}
-            className="text-[10px] px-1.5 py-0.5 rounded"
-            style={{ color: "var(--text-tertiary)", background: "var(--bg-elevated)" }}
-          >
+          <span key={type} className="chip">
             {type} {count}
           </span>
         ))}
@@ -92,10 +88,10 @@ export default function Theses() {
 
   return (
     <div>
-      <div className="flex items-baseline justify-between mb-6">
+      <div className="flex items-baseline justify-between mb-6 animate-in">
         <div>
-          <h1 className="text-heading" style={{ color: "var(--text-primary)" }}>Thesis Dashboard</h1>
-          <p className="text-meta mt-1">Your intellectual portfolio</p>
+          <h1 className="text-heading">Thesis Dashboard</h1>
+          <p className="text-caption mt-1">Your intellectual portfolio</p>
         </div>
         <span className="text-meta">{theses.length} theses tracked</span>
       </div>
@@ -103,42 +99,34 @@ export default function Theses() {
       {error && (
         <div
           className="text-[12px] py-3 px-4 rounded-lg mb-4"
-          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
+          style={{ background: "var(--status-high-bg)", color: "var(--status-high)" }}
         >
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="py-16 text-center text-body">Loading theses...</div>
+        <div className="py-16 text-center text-body" style={{ color: "var(--text-tertiary)" }}>Loading theses...</div>
       ) : theses.length === 0 && !error ? (
-        <div
-          className="rounded-xl p-12 text-center"
-          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
-        >
+        <div className="card p-12 text-center">
           <div className="text-2xl mb-3" style={{ color: "var(--text-quaternary)" }}>&mdash;</div>
           <div className="text-body">No theses tracked yet</div>
           <div className="text-meta mt-2">Ingest content tagged with thesis links to start tracking</div>
         </div>
       ) : (
-        <div className="space-y-2">
+        <div className="space-y-2 animate-in animate-in-delay-1">
           {theses
             .sort((a, b) => b.event_count - a.event_count)
             .map((t) => (
             <div
               key={t.thesis}
-              className="rounded-xl transition-all duration-150"
-              style={{
-                background: expanded === t.thesis ? "var(--bg-surface)" : "transparent",
-                border: expanded === t.thesis ? "1px solid var(--border-default)" : "1px solid transparent",
-              }}
+              className="thesis-row"
+              data-expanded={expanded === t.thesis ? "true" : undefined}
             >
               {/* Header row */}
               <button
                 onClick={() => toggleExpand(t.thesis)}
-                className="w-full text-left px-5 py-4 rounded-xl transition-colors"
-                onMouseEnter={(e) => { if (expanded !== t.thesis) e.currentTarget.style.background = "var(--bg-surface)"; }}
-                onMouseLeave={(e) => { if (expanded !== t.thesis) e.currentTarget.style.background = ""; }}
+                className="w-full text-left px-5 py-4"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
@@ -156,7 +144,7 @@ export default function Theses() {
                         <span
                           className="text-[10px] px-1.5 py-0.5 rounded"
                           style={{
-                            color: t.days_since_update > 30 ? "var(--status-high, #f87171)" : "var(--text-tertiary)",
+                            color: t.days_since_update > 30 ? "var(--status-high)" : "var(--text-tertiary)",
                             background: "var(--bg-elevated)",
                           }}
                         >
@@ -183,10 +171,7 @@ export default function Theses() {
                     </span>
                     <button
                       onClick={() => navigate(`/events?thesis=${encodeURIComponent(t.thesis)}`)}
-                      className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
-                      style={{ color: "var(--text-accent-dim)", border: "1px solid var(--border-accent)" }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(129,140,248,0.08)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      className="btn-accent text-[11px] font-medium px-2.5 py-1"
                     >
                       View all in Events
                     </button>
@@ -202,14 +187,11 @@ export default function Theses() {
                         <button
                           key={e.id}
                           onClick={() => setDrawer({ kind: "event", id: e.id })}
-                          className="w-full text-left px-3 py-2 rounded-lg transition-colors flex items-start gap-2"
-                          style={{ color: "var(--text-primary)" }}
-                          onMouseEnter={(ev) => (ev.currentTarget.style.background = "var(--bg-elevated)")}
-                          onMouseLeave={(ev) => (ev.currentTarget.style.background = "transparent")}
+                          className="event-row w-full text-left px-3 py-2 flex items-start gap-2"
                         >
                           <TypeLabel type={e.type} />
                           <div className="flex-1 min-w-0">
-                            <div className="text-[13px] truncate">{e.title || "\u2014"}</div>
+                            <div className="text-[13px] truncate" style={{ color: "var(--text-primary)" }}>{e.title || "\u2014"}</div>
                             <div className="flex items-center gap-2 mt-0.5">
                               <span className="text-meta text-[10px]">{new Date(e.created_at).toLocaleDateString()}</span>
                               {e.confidence > 0 && (
