@@ -48,9 +48,11 @@ class OpenRouterLLM(LLMPort):
 
     async def extract_metadata(self, content: str) -> dict:
         truncated = content[:4000] if len(content) > 4000 else content
-        prompt = EXTRACT_PROMPT.format(
-            content=truncated,
-            thesis_list=", ".join(self._thesis_list) or "(none defined yet)",
+        thesis = ", ".join(self._thesis_list) or "(none defined yet)"
+        # Use string concatenation to avoid .format() breaking on {/} in content
+        prompt = (
+            EXTRACT_PROMPT.replace("{thesis_list}", thesis)
+            .replace("{content}", truncated)
         )
         response = await self._chat(prompt)
         return _parse_json(response)
@@ -58,7 +60,7 @@ class OpenRouterLLM(LLMPort):
     async def classify_three_dimensions(self, content: str) -> dict:
         """Classify content along source, nature, temporality dimensions."""
         truncated = content[:4000] if len(content) > 4000 else content
-        prompt = CLASSIFY_PROMPT.format(content=truncated)
+        prompt = CLASSIFY_PROMPT.replace("{content}", truncated)
         response = await self._chat(prompt)
         return parse_classification(response)
 
@@ -69,7 +71,7 @@ class OpenRouterLLM(LLMPort):
         if fast:
             return fast
         # Fall back to LLM
-        prompt = STANCE_PARSE_PROMPT.format(annotation=annotation)
+        prompt = STANCE_PARSE_PROMPT.replace("{annotation}", annotation)
         response = await self._chat(prompt)
         response = response.strip().lower()
         if response in ("agree", "disagree", "uncertain", "skip"):

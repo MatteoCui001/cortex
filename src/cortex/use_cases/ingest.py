@@ -3,6 +3,7 @@ Ingestion use case: parse -> extract metadata -> classify -> embed -> store.
 """
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -41,42 +42,55 @@ class IngestUseCase:
         *,
         skip_existing: bool = True,
         on_progress: Optional[callable] = None,
+        concurrency: int = 8,
     ) -> dict:
-        """Import all Markdown files from an Obsidian vault."""
+        """Import all Markdown files from an Obsidian vault.
+
+        Args:
+            concurrency: Max parallel LLM/embed tasks. Default 8.
+        """
         vault = Path(vault_path)
         if not vault.is_dir():
             raise ValueError(f"Vault path does not exist: {vault_path}")
 
         files = sorted(vault.rglob("*.md"))
         stats = {"total": len(files), "imported": 0, "skipped": 0, "errors": 0}
+        counter = {"done": 0}
+        sem = asyncio.Semaphore(concurrency)
 
-        for i, md_file in enumerate(files):
+        async def _process(md_file: Path) -> None:
             rel_path = str(md_file.relative_to(vault))
-            try:
-                if skip_existing and await self._storage.event_exists(
-                    rel_path, self._workspace_id
-                ):
-                    stats["skipped"] += 1
+            async with sem:
+                try:
+                    if skip_existing and await self._storage.event_exists(
+                        rel_path, self._workspace_id
+                    ):
+                        stats["skipped"] += 1
+                        counter["done"] += 1
+                        if on_progress:
+                            on_progress(counter["done"], stats["total"], rel_path, "skipped")
+                        return
+
+                    event = await self.import_file(md_file, source_path=rel_path)
+                    if event:
+                        stats["imported"] += 1
+                        status = "imported"
+                    else:
+                        stats["skipped"] += 1
+                        status = "skipped"
+
+                    counter["done"] += 1
                     if on_progress:
-                        on_progress(i + 1, stats["total"], rel_path, "skipped")
-                    continue
+                        on_progress(counter["done"], stats["total"], rel_path, status)
 
-                event = await self.import_file(md_file, source_path=rel_path)
-                if event:
-                    stats["imported"] += 1
-                    status = "imported"
-                else:
-                    stats["skipped"] += 1
-                    status = "skipped"
+                except Exception as e:
+                    stats["errors"] += 1
+                    counter["done"] += 1
+                    if on_progress:
+                        on_progress(counter["done"], stats["total"], rel_path, f"error: {e}")
 
-                if on_progress:
-                    on_progress(i + 1, stats["total"], rel_path, status)
-
-            except Exception as e:
-                stats["errors"] += 1
-                if on_progress:
-                    on_progress(i + 1, stats["total"], rel_path, f"error: {e}")
-
+        tasks = [asyncio.create_task(_process(f)) for f in files]
+        await asyncio.gather(*tasks)
         return stats
 
     async def import_file(
@@ -173,6 +187,10 @@ class IngestUseCase:
 
         # 7. Compute expires_at from temporality
         temporality = classification.get("temporality")
+        if isinstance(temporality, list):
+            temporality = temporality[0] if temporality else None
+        if temporality and not isinstance(temporality, str):
+            temporality = str(temporality)
         expires_at = None
         if temporality:
             from datetime import timedelta
@@ -182,6 +200,10 @@ class IngestUseCase:
 
         # 8. Build event with all Phase 3 fields
         source_type = classification.get("source_type")
+        if isinstance(source_type, list):
+            source_type = source_type[0] if source_type else None
+        if source_type and not isinstance(source_type, str):
+            source_type = str(source_type)
         event = KnowledgeEvent(
             id=str(uuid.uuid4()),
             workspace_id=self._workspace_id,
@@ -189,9 +211,9 @@ class IngestUseCase:
             title=title,
             content=content,
             summary=metadata.get("summary", ""),
-            tags=metadata.get("tags", []),
-            thesis_links=metadata.get("thesis_links", []),
-            confidence=metadata.get("confidence", 0.5),
+            tags=[str(t) for t in metadata.get("tags", []) if not isinstance(t, (list, dict))],
+            thesis_links=[str(t) for t in metadata.get("thesis_links", []) if not isinstance(t, (list, dict))],
+            confidence=float(metadata.get("confidence", 0.5) or 0.5),
             tier=0,
             source=source,
             source_path=source_path,
@@ -205,8 +227,8 @@ class IngestUseCase:
             # Phase 3 fields
             raw_input_type=raw_input_type,
             raw_input_ref=raw_input_ref,
-            key_points=classification.get("key_points", []),
-            stance=classification.get("stance", {}),
+            key_points=classification.get("key_points", []) if isinstance(classification.get("key_points"), list) else [],
+            stance=classification.get("stance", {}) if isinstance(classification.get("stance"), dict) else {},
             source_type=source_type,
             source_weight=SOURCE_WEIGHTS.get(source_type, 0.5) if source_type else None,
             nature_tags=classification.get("nature_tags", []),
@@ -220,9 +242,16 @@ class IngestUseCase:
 
         # 8. Extract and store entities + relations (with canonicalization + inline embedding)
         entities = metadata.get("entities", [])
+        if not isinstance(entities, list):
+            entities = []
         for ent_data in entities:
-            ent_type = _map_entity_type(ent_data.get("type", "concept"))
-            raw_name = ent_data.get("name", "").strip()
+            if not isinstance(ent_data, dict):
+                continue
+            ent_type_raw = ent_data.get("type", "concept")
+            if not isinstance(ent_type_raw, str):
+                ent_type_raw = "concept"
+            ent_type = _map_entity_type(ent_type_raw)
+            raw_name = str(ent_data.get("name", "")).strip()
             if not raw_name:
                 continue
 

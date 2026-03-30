@@ -16,9 +16,9 @@ embedding:
 llm:
   openrouter:
     api_key: ${LLM_API_KEY}
-    model: MiniMax-M2.7
-    base_url: https://api.minimaxi.com/v1/text
-    chat_endpoint: /chatcompletion_v2
+    model: gemini-2.5-flash
+    base_url: https://generativelanguage.googleapis.com/v1beta/openai
+    chat_endpoint: /chat/completions
     thesis_list:
       - "AI Agent Infrastructure"
       - "AI Native Developer Tools"
