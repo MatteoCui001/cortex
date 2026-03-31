@@ -230,6 +230,50 @@ function AnnotationForm({ eventId, onSaved }: { eventId: string; onSaved: () => 
   );
 }
 
+/* ── Content reader ── */
+
+function ContentReader({ content }: { content: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const previewLen = 300;
+  const isLong = content.length > previewLen;
+
+  if (!content) return null;
+
+  return (
+    <div className="mt-3">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="btn-accent text-[11px] font-medium px-3 py-1.5 mb-2"
+      >
+        {expanded ? "Hide original" : "Read original"}
+      </button>
+      {expanded && (
+        <div
+          className="mt-2 px-4 py-3 rounded-lg text-[13px] leading-[1.7] overflow-auto"
+          style={{
+            background: "var(--bg-base)",
+            border: "1px solid var(--border-subtle)",
+            color: "var(--text-secondary)",
+            maxHeight: "60vh",
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+          }}
+        >
+          {content}
+        </div>
+      )}
+      {!expanded && isLong && (
+        <div
+          className="text-[12px] leading-[1.6] mt-1"
+          style={{ color: "var(--text-tertiary)" }}
+        >
+          {content.slice(0, previewLen)}...
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── Inline editable title ── */
 
 function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) => void }) {
@@ -396,6 +440,9 @@ export default function DetailDrawer({ target, onClose }: Props) {
                     />
                     {event.summary && (
                       <p className="text-body leading-relaxed">{event.summary}</p>
+                    )}
+                    {event.content && (
+                      <ContentReader content={event.content} />
                     )}
                     <AnnotationForm eventId={event.id} onSaved={refreshEvent} />
                     <div className="flex items-center gap-3 text-meta mt-1">

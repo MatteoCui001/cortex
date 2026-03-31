@@ -64,6 +64,7 @@ class EventResponse(BaseModel):
     type: str
     title: str
     summary: str
+    content: str = ""
     tags: list[str]
     thesis_links: list[str]
     confidence: float
@@ -829,6 +830,7 @@ def _event_to_response(event) -> EventResponse:
         type=event.type.value if hasattr(event.type, "value") else str(event.type),
         title=event.title,
         summary=event.summary,
+        content=getattr(event, "content", ""),
         tags=event.tags,
         thesis_links=event.thesis_links,
         confidence=event.confidence,
