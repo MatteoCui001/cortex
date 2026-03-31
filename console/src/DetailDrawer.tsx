@@ -421,7 +421,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
                         items={event.thesis_links}
                         onUpdate={(thesis_links) => handleUpdateField({ thesis_links })}
                         color="var(--text-accent)"
-                        bg="rgba(165,180,252,0.08)"
+                        bg="rgba(217,171,89,0.08)"
                       />
                     </div>
                     {event.source_path && (
@@ -457,7 +457,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
                                  "var(--text-accent)",
                           background: linkedSignal.signal_type === "contradiction" ? "var(--status-high-bg)" :
                                       linkedSignal.signal_type === "answer" ? "var(--status-success-bg)" :
-                                      "rgba(165,180,252,0.08)",
+                                      "rgba(217,171,89,0.08)",
                         }}
                       >
                         {linkedSignal.signal_type}

@@ -12,94 +12,61 @@ import Settings from "./pages/Settings";
 
 const navItems = [
   { to: "/overview", label: "Overview", desc: "Dashboard" },
-  { to: "/digest", label: "Digest", desc: "Daily Brief" },
+  { to: "/digest", label: "Digest", desc: "Brief" },
   { to: "/theses", label: "Theses", desc: "Portfolio" },
-  { to: "/inbox", label: "Inbox", desc: "Notifications" },
+  { to: "/inbox", label: "Inbox", desc: "Alerts" },
   { to: "/signals", label: "Signals", desc: "Insights" },
-  { to: "/events", label: "Events", desc: "Knowledge" },
-  { to: "/graph", label: "Graph", desc: "Entity Map" },
-  { to: "/search", label: "Search", desc: "Find anything" },
-  { to: "/ingest", label: "Ingest", desc: "Add content" },
-  { to: "/settings", label: "Settings", desc: "Configuration" },
+  { to: "/events", label: "Events", desc: "Store" },
+  { to: "/graph", label: "Graph", desc: "Entities" },
+  { to: "/search", label: "Search", desc: "Query" },
+  { to: "/ingest", label: "Ingest", desc: "Add" },
+  { to: "/settings", label: "Settings", desc: "Config" },
 ];
 
 export default function App() {
   return (
     <div className="min-h-screen flex flex-col md:flex-row" style={{ background: "var(--bg-base)" }}>
-      {/* Sidebar — hidden on mobile */}
+      {/* Sidebar */}
       <nav
         className="hidden md:flex w-52 shrink-0 flex-col border-r"
-        style={{
-          background: "var(--bg-base)",
-          borderColor: "var(--border-subtle)",
-        }}
+        style={{ background: "var(--bg-base)", borderColor: "var(--border-subtle)" }}
       >
         {/* Brand */}
-        <div className="px-5 pt-6 pb-8">
-          <div
-            className="text-[15px] font-semibold tracking-tight"
-            style={{ color: "var(--text-primary)" }}
-          >
-            Cortex
+        <div className="px-4 pt-6 pb-5 flex items-center gap-3">
+          <div className="brand-glyph">C</div>
+          <div>
+            <div className="text-[14px] font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
+              Cortex
+            </div>
+            <div className="font-data text-[10px]" style={{ color: "var(--text-quaternary)" }}>
+              v0.1.0-beta
+            </div>
           </div>
-          <div className="text-meta mt-0.5">Knowledge Infrastructure</div>
         </div>
 
-        {/* Nav items */}
-        <div className="flex-1 px-3 flex flex-col gap-0.5">
+        {/* Nav */}
+        <div className="flex-1 px-3 flex flex-col gap-0.5 overflow-y-auto">
           {navItems.map((item) => (
-            <NavLink
-              key={item.to}
-              to={item.to}
-              className={({ isActive }) =>
-                `group flex flex-col px-3 py-2 rounded-lg transition-all duration-150 ${
-                  isActive ? "nav-active" : "nav-idle"
-                }`
-              }
-              style={({ isActive }) => ({
-                background: isActive ? "var(--bg-elevated)" : "transparent",
-                borderLeft: isActive
-                  ? "2px solid var(--text-accent)"
-                  : "2px solid transparent",
-              })}
-            >
+            <NavLink key={item.to} to={item.to} className="nav-item" data-active={undefined}>
               {({ isActive }) => (
-                <>
-                  <span
-                    className="text-[13px] font-medium"
-                    style={{
-                      color: isActive
-                        ? "var(--text-primary)"
-                        : "var(--text-secondary)",
-                    }}
-                  >
-                    {item.label}
-                  </span>
-                  <span
-                    className="text-[10px] mt-px"
-                    style={{
-                      color: isActive
-                        ? "var(--text-tertiary)"
-                        : "var(--text-quaternary)",
-                    }}
-                  >
-                    {item.desc}
-                  </span>
-                </>
+                <div className="nav-item" data-active={isActive ? "true" : undefined} style={{ padding: 0, border: "none" }}>
+                  <span className="nav-label">{item.label}</span>
+                  <span className="nav-desc">{item.desc}</span>
+                </div>
               )}
             </NavLink>
           ))}
         </div>
 
         {/* Footer */}
-        <div className="px-5 py-4 border-t" style={{ borderColor: "var(--border-subtle)" }}>
-          <div className="text-meta">v0.1.0</div>
+        <div className="px-4 py-3">
+          <div className="text-[10px] font-data" style={{ color: "var(--text-quaternary)" }}>Knowledge Infrastructure</div>
         </div>
       </nav>
 
-      {/* Main content */}
+      {/* Main */}
       <main className="flex-1 overflow-auto pb-16 md:pb-0">
-        <div className="max-w-5xl mx-auto px-4 py-4 md:px-8 md:py-8">
+        <div className="max-w-5xl mx-auto px-4 py-5 md:px-10 md:py-8">
           <Routes>
             <Route path="/" element={<Navigate to="/overview" replace />} />
             <Route path="/overview" element={<Overview />} />
@@ -116,24 +83,21 @@ export default function App() {
         </div>
       </main>
 
-      {/* Mobile bottom tab bar */}
+      {/* Mobile bottom tabs */}
       <nav
         className="md:hidden fixed bottom-0 left-0 right-0 flex border-t z-50"
-        style={{
-          background: "var(--bg-base)",
-          borderColor: "var(--border-subtle)",
-        }}
+        style={{ background: "var(--bg-glass)", borderColor: "var(--border-subtle)", backdropFilter: "blur(16px)" }}
       >
-        {navItems.map((item) => (
+        {navItems.slice(0, 6).map((item) => (
           <NavLink
             key={item.to}
             to={item.to}
-            className="flex-1 flex flex-col items-center py-2"
+            className="flex-1 flex flex-col items-center py-2.5"
             style={({ isActive }) => ({
               color: isActive ? "var(--text-accent)" : "var(--text-quaternary)",
             })}
           >
-            <span className="text-[11px] font-medium">{item.label}</span>
+            <span className="text-[10px] font-medium">{item.label}</span>
           </NavLink>
         ))}
       </nav>
