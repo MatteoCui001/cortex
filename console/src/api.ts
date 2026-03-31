@@ -47,6 +47,7 @@ export interface Event {
   type: string;
   title: string;
   summary: string;
+  content: string;
   tags: string[];
   thesis_links: string[];
   confidence: number;
