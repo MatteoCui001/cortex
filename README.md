@@ -1,6 +1,10 @@
 # Cortex
 
-**AI-native knowledge infrastructure for humans and agents.**
+> **v0.1.0-beta** -- AI-native knowledge infrastructure for humans and agents.
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776ab.svg)](https://www.python.org)
+[![Docker](https://img.shields.io/badge/docker-compose-2496ed.svg)](docker-compose.yml)
 
 Cortex is a personal knowledge engine that ingests, analyzes, and connects information from heterogeneous sources — Obsidian notes, web articles, PDFs, WeChat messages, meeting transcripts — into a unified knowledge graph with semantic search, entity extraction, signal detection, and proactive notifications.
 
@@ -11,6 +15,10 @@ Built for knowledge workers who operate across languages (Chinese + English), fo
 **Cortex 是一个 AI 原生的认知基础设施。** 它将 Obsidian 笔记、网页文章、PDF、微信消息、会议纪要等异构信息源，统一为一个支持语义搜索、实体抽取、信号检测和主动通知的知识图谱。
 
 为跨语言（中英）、跨格式、跨工具的知识工作者而建。天然支持 AI Agent 作为认知后端扩展。
+
+## Status / 状态
+
+This is an early **beta** release. The core features work but the API surface may change. Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/MatteoCui001/cortex/issues).
 
 ## Why Cortex / 为什么做 Cortex
 

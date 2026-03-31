@@ -4,6 +4,7 @@ REST API routes -- the primary interface for both humans and agents.
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -280,6 +281,10 @@ async def list_events(
 @router.get("/events/{event_id}", response_model=EventResponse)
 async def get_event(event_id: str, request: Request):
     """Get a specific event by ID."""
+    try:
+        uuid.UUID(event_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Event not found")
     workspace = request.app.state.config.get("workspace", "default")
     event = await request.app.state.storage.get_event(event_id, workspace_id=workspace)
     if not event:
