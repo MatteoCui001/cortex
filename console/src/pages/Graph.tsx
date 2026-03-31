@@ -115,7 +115,7 @@ function drawGraph(
     if (isHovered) {
       const mx = (a.x + b.x) / 2;
       const my = (a.y + b.y) / 2;
-      ctx.font = "10px 'JetBrains Mono', monospace";
+      ctx.font = "10px 'IBM Plex Mono', monospace";
       ctx.fillStyle = "rgba(148,163,184,0.6)";
       ctx.textAlign = "center";
       ctx.fillText(e.relation, mx, my - 4);
@@ -132,7 +132,7 @@ function drawGraph(
     ctx.fillStyle = isHovered ? c : c + "99";
     ctx.fill();
 
-    ctx.font = isHovered ? "bold 12px 'Instrument Sans', sans-serif" : "11px 'Instrument Sans', sans-serif";
+    ctx.font = isHovered ? "bold 12px 'Plus Jakarta Sans', sans-serif" : "11px 'Plus Jakarta Sans', sans-serif";
     ctx.fillStyle = isHovered ? "#e2e8f0" : "#94a3b8";
     ctx.textAlign = "center";
     ctx.fillText(n.label, n.x, n.y - r - 4);
