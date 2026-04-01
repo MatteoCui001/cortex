@@ -10,7 +10,9 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@fontsource-variable/crimson-pro": "^5.2.8",
     "@fontsource-variable/plus-jakarta-sans": "^5.2.8",
+    "@fontsource-variable/source-sans-3": "^5.2.9",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",

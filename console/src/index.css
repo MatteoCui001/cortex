@@ -1,71 +1,72 @@
 @import "tailwindcss";
 
 /* ═══════════════════════════════════════════════
-   CORTEX — Void Precision Design System
-   Fonts: Plus Jakarta Sans + IBM Plex Mono
-   Palette: true black + warm gold accent
+   CORTEX — Warm Library Design System
+   Fonts: Crimson Pro (serif display) + Source Sans 3 (body) + IBM Plex Mono
+   Palette: warm paper + terracotta accent
+   Inspired by: Notion, Readwise, scholarly reading rooms
    ═══════════════════════════════════════════════ */
 
 :root {
   /* ── Backgrounds ── */
-  --bg-base: #09090b;
-  --bg-surface: #0f0f12;
-  --bg-elevated: #18181b;
-  --bg-hover: #1f1f23;
-  --bg-active: #27272a;
-  --bg-glass: rgba(15, 15, 18, 0.92);
+  --bg-base: #FAF8F5;
+  --bg-surface: #FFFFFF;
+  --bg-elevated: #F2EFE9;
+  --bg-hover: #ECE8E0;
+  --bg-active: #E3DED4;
+  --bg-glass: rgba(250, 248, 245, 0.92);
 
   /* ── Borders ── */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.09);
-  --border-strong: rgba(255, 255, 255, 0.15);
-  --border-accent: rgba(217, 171, 89, 0.2);
-  --border-warm: rgba(217, 171, 89, 0.1);
+  --border-subtle: rgba(0, 0, 0, 0.06);
+  --border-default: rgba(0, 0, 0, 0.10);
+  --border-strong: rgba(0, 0, 0, 0.18);
+  --border-accent: rgba(180, 90, 56, 0.20);
+  --border-warm: rgba(180, 90, 56, 0.10);
 
   /* ── Text ── */
-  --text-primary: #fafafa;
-  --text-secondary: #a1a1aa;
-  --text-tertiary: #63636e;
-  --text-quaternary: #3f3f46;
-  --text-accent: #d9ab59;
-  --text-accent-dim: rgba(217, 171, 89, 0.65);
-  --text-warm: #eab36b;
+  --text-primary: #1C1917;
+  --text-secondary: #57534E;
+  --text-tertiary: #A8A29E;
+  --text-quaternary: #D6D3D1;
+  --text-accent: #B45A38;
+  --text-accent-dim: rgba(180, 90, 56, 0.70);
+  --text-warm: #C67A4E;
 
   /* ── Status ── */
-  --status-high: #ef4444;
-  --status-high-bg: rgba(239, 68, 68, 0.08);
-  --status-medium: #f59e0b;
-  --status-medium-bg: rgba(245, 158, 11, 0.08);
+  --status-high: #DC2626;
+  --status-high-bg: rgba(220, 38, 38, 0.06);
+  --status-medium: #D97706;
+  --status-medium-bg: rgba(217, 119, 6, 0.06);
   --status-low: var(--text-tertiary);
-  --status-low-bg: rgba(99, 99, 110, 0.08);
-  --status-success: #22c55e;
-  --status-success-bg: rgba(34, 197, 94, 0.08);
-  --status-up: #22c55e;
+  --status-low-bg: rgba(168, 162, 158, 0.06);
+  --status-success: #16A34A;
+  --status-success-bg: rgba(22, 163, 74, 0.06);
+  --status-up: #16A34A;
 
-  /* ── Type colors ── */
-  --type-article: #60a5fa;
-  --type-article-bg: rgba(96, 165, 250, 0.1);
-  --type-note: #a78bfa;
-  --type-note-bg: rgba(167, 139, 250, 0.1);
-  --type-chat: #f472b6;
-  --type-chat-bg: rgba(244, 114, 182, 0.1);
-  --type-meeting: #34d399;
-  --type-meeting-bg: rgba(52, 211, 153, 0.1);
-  --type-thesis: #c084fc;
-  --type-thesis-bg: rgba(192, 132, 252, 0.08);
-  --type-voice: #fb923c;
-  --type-voice-bg: rgba(251, 146, 60, 0.1);
-  --type-document: #2dd4bf;
-  --type-document-bg: rgba(45, 212, 191, 0.1);
+  /* ── Type colors (softer for light theme) ── */
+  --type-article: #2563EB;
+  --type-article-bg: rgba(37, 99, 235, 0.07);
+  --type-note: #7C3AED;
+  --type-note-bg: rgba(124, 58, 237, 0.07);
+  --type-chat: #DB2777;
+  --type-chat-bg: rgba(219, 39, 119, 0.07);
+  --type-meeting: #059669;
+  --type-meeting-bg: rgba(5, 150, 105, 0.07);
+  --type-thesis: #9333EA;
+  --type-thesis-bg: rgba(147, 51, 234, 0.06);
+  --type-voice: #EA580C;
+  --type-voice-bg: rgba(234, 88, 12, 0.07);
+  --type-document: #0891B2;
+  --type-document-bg: rgba(8, 145, 178, 0.07);
 
   /* ── Radii ── */
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 12px;
 
-  /* ── Shadows ── */
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-elevated: 0 8px 32px rgba(0, 0, 0, 0.5);
+  /* ── Shadows (softer, warmer) ── */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.04), 0 1px 2px rgba(0, 0, 0, 0.03);
+  --shadow-elevated: 0 4px 24px rgba(0, 0, 0, 0.08);
 }
 
 /* ── Base ── */
@@ -73,26 +74,27 @@ body {
   margin: 0;
   background: var(--bg-base);
   color: var(--text-primary);
-  font-family: "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  font-family: "Source Sans 3", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  line-height: 1.55;
+  line-height: 1.6;
   font-size: 14px;
 }
 
-::selection { background: rgba(217, 171, 89, 0.18); color: var(--text-primary); }
+::selection { background: rgba(180, 90, 56, 0.12); color: var(--text-primary); }
 
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.07); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.12); }
+::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(0, 0, 0, 0.14); }
 
 /* ── Typography ── */
 .text-heading {
-  font-size: 1.25rem;
-  font-weight: 700;
-  letter-spacing: -0.025em;
-  line-height: 1.2;
+  font-family: "Crimson Pro", Georgia, "Times New Roman", serif;
+  font-size: 1.5rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
   color: var(--text-primary);
 }
 .text-subheading {
@@ -103,12 +105,12 @@ body {
   color: var(--text-tertiary);
 }
 .text-body {
-  font-size: 0.8125rem;
-  line-height: 1.6;
+  font-size: 0.875rem;
+  line-height: 1.65;
   color: var(--text-secondary);
 }
 .text-caption {
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   color: var(--text-tertiary);
   letter-spacing: -0.005em;
 }
@@ -128,24 +130,26 @@ body {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
-  transition: border-color 180ms;
+  box-shadow: var(--shadow-card);
+  transition: border-color 180ms, box-shadow 180ms;
 }
 .card:hover { border-color: var(--border-default); }
 .card-glow {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   transition: border-color 180ms, box-shadow 180ms;
 }
 .card-glow:hover {
   border-color: var(--border-accent);
-  box-shadow: 0 0 24px rgba(217, 171, 89, 0.04);
+  box-shadow: 0 2px 16px rgba(180, 90, 56, 0.06);
 }
 
 /* ── Buttons ── */
 .btn-primary {
   background: var(--text-accent);
-  color: #09090b;
+  color: #FFFFFF;
   font-weight: 600;
   font-size: 0.8125rem;
   border: none;
@@ -156,7 +160,7 @@ body {
 }
 .btn-primary:hover { opacity: 0.88; }
 .btn-primary:active { transform: scale(0.97); }
-.btn-primary:disabled { opacity: 0.3; cursor: default; }
+.btn-primary:disabled { opacity: 0.35; cursor: default; }
 .btn-primary:disabled:hover { transform: none; }
 
 .btn-ghost {
@@ -181,11 +185,11 @@ body {
   cursor: pointer;
   transition: all 150ms;
 }
-.btn-accent:hover { color: var(--text-accent); background: rgba(217, 171, 89, 0.06); }
+.btn-accent:hover { color: var(--text-accent); background: rgba(180, 90, 56, 0.05); }
 
 /* ── Inputs ── */
 .input-field {
-  background: var(--bg-base);
+  background: var(--bg-surface);
   border: 1px solid var(--border-default);
   border-radius: var(--radius-md);
   color: var(--text-primary);
@@ -194,13 +198,13 @@ body {
 }
 .input-field:focus {
   border-color: var(--text-accent);
-  box-shadow: 0 0 0 3px rgba(217, 171, 89, 0.08);
+  box-shadow: 0 0 0 3px rgba(180, 90, 56, 0.08);
 }
 .input-field::placeholder { color: var(--text-quaternary); }
 
 /* ── Segment controls ── */
 .segment-control {
-  background: var(--bg-surface);
+  background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 3px;
@@ -220,9 +224,9 @@ body {
 }
 .segment-btn:hover { color: var(--text-secondary); }
 .segment-btn[data-active="true"] {
-  background: var(--bg-elevated);
+  background: var(--bg-surface);
   color: var(--text-primary);
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
 
 /* ── Navigation ── */
@@ -260,16 +264,18 @@ body {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   transition: border-color 180ms;
 }
 .notif-card:hover { border-color: var(--border-default); }
 .notif-card[data-highlight="true"] { border-color: var(--border-accent); }
-.notif-card[data-highlight="true"]:hover { border-color: rgba(217, 171, 89, 0.3); }
+.notif-card[data-highlight="true"]:hover { border-color: rgba(180, 90, 56, 0.30); }
 
 .signal-card {
   background: var(--bg-surface);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card);
   transition: border-color 180ms;
 }
 .signal-card:hover { border-color: var(--border-default); }
@@ -279,10 +285,11 @@ body {
   border: 1px solid transparent;
   transition: all 120ms;
 }
-.event-row:hover { background: var(--bg-surface); }
+.event-row:hover { background: var(--bg-elevated); }
 .event-row[data-expanded="true"] {
   background: var(--bg-surface);
   border-color: var(--border-subtle);
+  box-shadow: var(--shadow-card);
 }
 
 .thesis-row {
@@ -290,10 +297,11 @@ body {
   border: 1px solid transparent;
   transition: all 150ms;
 }
-.thesis-row:hover { background: var(--bg-surface); }
+.thesis-row:hover { background: var(--bg-elevated); }
 .thesis-row[data-expanded="true"] {
   background: var(--bg-surface);
   border-color: var(--border-subtle);
+  box-shadow: var(--shadow-card);
 }
 
 .search-result {
@@ -301,7 +309,7 @@ body {
   border: 1px solid transparent;
   transition: all 120ms;
 }
-.search-result:hover { background: var(--bg-surface); }
+.search-result:hover { background: var(--bg-elevated); }
 
 /* ── Chips ── */
 .chip {
@@ -320,20 +328,20 @@ body {
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   color: var(--text-accent);
-  background: rgba(217, 171, 89, 0.08);
+  background: rgba(180, 90, 56, 0.07);
   border: none;
   cursor: pointer;
   transition: background 120ms;
 }
-.thesis-chip:hover { background: rgba(217, 171, 89, 0.14); }
+.thesis-chip:hover { background: rgba(180, 90, 56, 0.12); }
 
 /* ── Drawer ── */
 .drawer-backdrop {
   position: fixed;
   inset: 0;
   z-index: 40;
-  background: rgba(0, 0, 0, 0.6);
-  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(4px);
 }
 .drawer-panel {
   position: fixed;
@@ -344,17 +352,17 @@ body {
   width: 420px;
   max-width: 85vw;
   overflow-y: auto;
-  background: var(--bg-surface);
+  background: var(--bg-base);
   border-left: 1px solid var(--border-default);
-  box-shadow: -12px 0 48px rgba(0, 0, 0, 0.5);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.08);
 }
 
 /* ── Metrics ── */
 .metric-value {
-  font-family: "Plus Jakarta Sans", system-ui;
-  font-weight: 700;
+  font-family: "Crimson Pro", Georgia, serif;
+  font-weight: 600;
   font-size: 2rem;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.03em;
   line-height: 1;
   color: var(--text-primary);
 }
@@ -371,30 +379,30 @@ body {
 .annotation-block {
   padding: 8px 12px;
   border-radius: var(--radius-sm);
-  background: rgba(217, 171, 89, 0.03);
+  background: rgba(180, 90, 56, 0.04);
   border-left: 2px solid var(--text-accent-dim);
 }
 
 /* ── Brand ── */
 .brand-glyph {
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border-radius: 8px;
-  background: linear-gradient(135deg, rgba(217, 171, 89, 0.14), rgba(217, 171, 89, 0.04));
-  border: 1px solid rgba(217, 171, 89, 0.12);
+  background: linear-gradient(135deg, rgba(180, 90, 56, 0.12), rgba(180, 90, 56, 0.04));
+  border: 1px solid rgba(180, 90, 56, 0.10);
   display: flex;
   align-items: center;
   justify-content: center;
-  font-family: "IBM Plex Mono", monospace;
+  font-family: "Crimson Pro", Georgia, serif;
   font-weight: 600;
-  font-size: 14px;
+  font-size: 16px;
   color: var(--text-accent);
   flex-shrink: 0;
 }
 
 /* ── Dots ── */
 .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-.dot-high { background: var(--status-high); box-shadow: 0 0 6px rgba(239, 68, 68, 0.4); }
+.dot-high { background: var(--status-high); box-shadow: 0 0 6px rgba(220, 38, 38, 0.25); }
 .dot-medium { background: var(--status-medium); }
 .dot-low { background: var(--text-quaternary); }
 
@@ -414,7 +422,7 @@ body {
   100% { background-position: 200% 0; }
 }
 .loading-shimmer {
-  background: linear-gradient(90deg, var(--bg-surface) 30%, var(--bg-elevated) 50%, var(--bg-surface) 70%);
+  background: linear-gradient(90deg, var(--bg-elevated) 30%, var(--bg-hover) 50%, var(--bg-elevated) 70%);
   background-size: 200% 100%;
   animation: shimmer 1.5s ease infinite;
   border-radius: var(--radius-md);

@@ -16,13 +16,16 @@ from cortex.api.routes import router
 from cortex.domain.entities import (
     Annotation,
     ContradictionResult,
+    EvidenceImpact,
     KnowledgeEvent,
     EventType,
     Notification,
     NotificationStatus,
     SearchResult,
     SignalFeedback,
+    Thesis,
     ThesisCoverage,
+    ThesisEvidence,
 )
 from cortex.domain.ports import EmbeddingPort, LLMPort, StoragePort
 from cortex.use_cases.analyze import AnalyzeUseCase
@@ -44,6 +47,8 @@ class FakeStorage(StoragePort):
         self._signals: list[ContradictionResult] = []
         self._signal_feedback: list[SignalFeedback] = []
         self._notifications: dict[str, Notification] = {}
+        self._theses: dict[str, Thesis] = {}
+        self._thesis_evidence: list[ThesisEvidence] = []
 
     def _make_event(self, **kwargs) -> KnowledgeEvent:
         defaults = dict(
@@ -183,13 +188,16 @@ class FakeStorage(StoragePort):
     async def get_all_events_with_tags(self, workspace_id="default") -> list[dict]:
         return []
 
-    async def list_events(self, workspace_id="default", *, limit=50, offset=0, days=None):
+    async def list_events(self, workspace_id="default", *, limit=50, offset=0, days=None, sort="recent"):
         events = [e for e in self._events.values() if e.workspace_id == workspace_id]
         if days:
             from datetime import timedelta
             cutoff = datetime.now(timezone.utc) - timedelta(days=days)
             events = [e for e in events if e.created_at and e.created_at >= cutoff]
-        events.sort(key=lambda e: e.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        if sort == "relevance":
+            events.sort(key=lambda e: (e.relevance or 0, e.created_at or datetime.min.replace(tzinfo=timezone.utc)), reverse=True)
+        else:
+            events.sort(key=lambda e: e.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         return events[offset:offset + limit]
 
     async def update_event_fields(
@@ -227,6 +235,9 @@ class FakeStorage(StoragePort):
 
     async def get_events_for_entity(self, entity_id, workspace_id="default", limit=50) -> list[KnowledgeEvent]:
         return []
+
+    async def get_thesis_entity_graph(self, workspace_id="default", entity_limit=50, per_thesis_limit=5) -> dict:
+        return {"entities": [], "relations": []}
 
     async def recent_events_by_thesis(self, days=1, workspace_id="default") -> list[dict]:
         return []
@@ -355,6 +366,89 @@ class FakeStorage(StoragePort):
         return False
 
 
+    # --- Phase 6: Thesis CRUD + evidence ---
+
+    def _compute_confidence_for(self, thesis_id: str) -> float:
+        score = 0.5
+        for e in self._thesis_evidence:
+            if e.thesis_id != thesis_id:
+                continue
+            if e.impact == EvidenceImpact.SUPPORTS:
+                score += e.confidence_delta * 0.1
+            elif e.impact == EvidenceImpact.CONTRADICTS:
+                score -= e.confidence_delta * 0.1
+        return max(0.0, min(1.0, score))
+
+    async def create_thesis(self, thesis: Thesis) -> str:
+        self._theses[thesis.id] = thesis
+        return thesis.id
+
+    async def get_thesis(self, thesis_id, workspace_id="default"):
+        t = self._theses.get(thesis_id)
+        if t and t.workspace_id == workspace_id:
+            t.confidence = self._compute_confidence_for(thesis_id)
+            return t
+        return None
+
+    async def list_theses(self, workspace_id="default", *, status=None, theme=None, confirmed_only=False):
+        results = [t for t in self._theses.values() if t.workspace_id == workspace_id]
+        if status:
+            st = status.value if hasattr(status, "value") else status
+            results = [t for t in results if (t.status.value if hasattr(t.status, "value") else t.status) == st]
+        if theme:
+            results = [t for t in results if t.theme == theme]
+        if confirmed_only:
+            results = [t for t in results if t.confirmed]
+        for t in results:
+            t.confidence = self._compute_confidence_for(t.id)
+        return results
+
+    async def update_thesis(self, thesis_id, workspace_id, *, text=None, stance=None,
+                            status=None, expires_at=None, theme=None, confirmed=None):
+        t = self._theses.get(thesis_id)
+        if not t or t.workspace_id != workspace_id:
+            return False
+        if text is not None:
+            t.text = text
+        if stance is not None:
+            from cortex.domain.entities import ThesisStance
+            t.stance = ThesisStance(stance) if isinstance(stance, str) else stance
+        if status is not None:
+            from cortex.domain.entities import ThesisStatus
+            t.status = ThesisStatus(status) if isinstance(status, str) else status
+        if expires_at is not None:
+            t.expires_at = expires_at
+        if theme is not None:
+            t.theme = theme
+        if confirmed is not None:
+            t.confirmed = confirmed
+        return True
+
+    async def delete_thesis(self, thesis_id, workspace_id):
+        t = self._theses.get(thesis_id)
+        if t and t.workspace_id == workspace_id:
+            del self._theses[thesis_id]
+            self._thesis_evidence = [e for e in self._thesis_evidence if e.thesis_id != thesis_id]
+            return True
+        return False
+
+    async def record_evidence(self, evidence: ThesisEvidence) -> str:
+        self._thesis_evidence = [
+            e for e in self._thesis_evidence
+            if not (e.thesis_id == evidence.thesis_id and e.event_id == evidence.event_id)
+        ]
+        self._thesis_evidence.append(evidence)
+        return evidence.id
+
+    async def get_evidence_for_thesis(self, thesis_id, workspace_id="default", limit=50):
+        results = [e for e in self._thesis_evidence if e.thesis_id == thesis_id]
+        results.sort(key=lambda e: e.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+        return results[:limit]
+
+    async def get_evidence_for_event(self, event_id, workspace_id="default"):
+        return [e for e in self._thesis_evidence if e.event_id == event_id]
+
+
 class FakeEmbedding(EmbeddingPort):
     """Returns zero vectors of the configured dimension."""
 
@@ -374,12 +468,14 @@ class FakeLLM(LLMPort):
 
     async def extract_metadata(self, content: str) -> dict:
         return {
+            "skip": False,
             "summary": content[:100].replace("\n", " "),
             "tags": ["test"],
             "entities": [],
             "thesis_links": [],
             "confidence": 0.7,
             "event_type": "note",
+            "relevance": 0.5,
         }
 
     async def classify_three_dimensions(self, content: str) -> dict:
@@ -399,6 +495,14 @@ class FakeLLM(LLMPort):
 
     async def chat(self, prompt: str) -> str:
         return "OK"
+
+    async def assess_thesis_impact(
+        self, event_content: str, event_summary: str, thesis_text: str, thesis_stance: str,
+    ) -> dict:
+        return {"impact": "neutral", "confidence_delta": 0.0, "rationale": "stub"}
+
+    async def generate_theses(self, theme: str, events_text: str) -> list[dict]:
+        return [{"text": f"Test thesis for {theme}", "stance": "bullish", "rationale": "stub"}]
 
 
 # ------------------------------------------------------------------

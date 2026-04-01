@@ -28,7 +28,30 @@ services:
       - ./config.docker.yaml:/app/config.local.yaml:ro
     ports:
       - "8420:8420"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8420/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  wechat:
+    build:
+      context: ./cortex-wechat
+      dockerfile: Dockerfile
+    environment:
+      - CORTEX_BASE_URL=http://cortex:8420/api/v1
+      - CORTEX_API_TOKEN=${CORTEX_API_TOKEN}
+      - LLM_BASE_URL=${LLM_BASE_URL:-}
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-}
+    volumes:
+      - wechat-state:/root/.cortex/wechat
+    depends_on:
+      cortex:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   pgdata:
   filestore:
+  wechat-state:

@@ -10,9 +10,10 @@ from typing import Optional
 import asyncpg
 
 from cortex.domain.entities import (
-    ContradictionResult, Entity, EntityType, EventType, KnowledgeEvent,
-    Notification, NotificationChannel, NotificationStatus,
-    Relation, RelationType, SearchResult, SignalFeedback, ThesisCoverage,
+    ContradictionResult, Entity, EntityType, EvidenceImpact, EventType,
+    KnowledgeEvent, Notification, NotificationChannel, NotificationStatus,
+    Relation, RelationType, SearchResult, SignalFeedback, Thesis,
+    ThesisCoverage, ThesisCreatedBy, ThesisEvidence, ThesisStance, ThesisStatus,
 )
 from cortex.domain.ports import StoragePort
 
@@ -23,6 +24,7 @@ class PostgresStorage(StoragePort):
         self._dsn = dsn
         self._pool: Optional[asyncpg.Pool] = None
         self._fts_config = "simple"  # detected at connect time
+        self._has_embedding = False  # detected at connect time
 
     async def connect(self):
         self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=10)
@@ -30,6 +32,12 @@ class PostgresStorage(StoragePort):
             await self._pool.execute("CREATE EXTENSION IF NOT EXISTS vector")
         except Exception:
             pass  # pgvector not available — semantic search will fail gracefully
+        # Detect if embedding column exists on events table
+        row = await self._pool.fetchrow(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_name = 'events' AND column_name = 'embedding'"
+        )
+        self._has_embedding = row is not None
         # Detect which text search config is available
         row = await self._pool.fetchrow(
             "SELECT 1 FROM pg_ts_config WHERE cfgname = 'zhcfg'"
@@ -53,14 +61,14 @@ class PostgresStorage(StoragePort):
             embedding, metadata, created_at, updated_at,
             raw_input_type, raw_input_ref, key_points, stance,
             source_type, source_weight, nature_tags, temporality,
-            expires_at, user_annotation, user_stance
+            expires_at, user_annotation, user_stance, relevance
         ) VALUES (
             $1, $2, $3, $4, $5, $6,
             $7, $8, $9, $10, $11, $12,
             $13, $14, $15, $16,
             $17, $18, $19, $20,
             $21, $22, $23, $24,
-            $25, $26, $27
+            $25, $26, $27, $28
         )
         ON CONFLICT (workspace_id, source_path)
             WHERE source_path != ''
@@ -90,7 +98,8 @@ class PostgresStorage(StoragePort):
             temporality = COALESCE(EXCLUDED.temporality, events.temporality),
             expires_at = COALESCE(EXCLUDED.expires_at, events.expires_at),
             user_annotation = COALESCE(EXCLUDED.user_annotation, events.user_annotation),
-            user_stance = COALESCE(EXCLUDED.user_stance, events.user_stance)
+            user_stance = COALESCE(EXCLUDED.user_stance, events.user_stance),
+            relevance = COALESCE(EXCLUDED.relevance, events.relevance)
         RETURNING id
         """
         embedding_val = _to_pgvector(event.embedding) if event.embedding else None
@@ -123,6 +132,7 @@ class PostgresStorage(StoragePort):
             getattr(event, 'expires_at', None),
             getattr(event, 'user_annotation', None),
             getattr(event, 'user_stance', None),
+            getattr(event, 'relevance', None),
         )
         return str(row["id"])
 
@@ -153,14 +163,25 @@ class PostgresStorage(StoragePort):
     async def find_entity_by_name(
         self, workspace_id: str, entity_type: str, name: str,
     ) -> Optional[Entity]:
-        sql = """
+        # First try type-agnostic lookup to avoid duplicates across types
+        sql_any = """
         SELECT id, workspace_id, type, name, aliases, properties, embedding,
                created_at, updated_at
         FROM entities
-        WHERE workspace_id = $1 AND type = $2 AND name = $3
+        WHERE workspace_id = $1 AND name = $2
         LIMIT 1
         """
-        row = await self._pool.fetchrow(sql, workspace_id, entity_type, name)
+        row = await self._pool.fetchrow(sql_any, workspace_id, name)
+        if not row:
+            # Fallback: type-specific (shouldn't normally be needed)
+            sql_typed = """
+            SELECT id, workspace_id, type, name, aliases, properties, embedding,
+                   created_at, updated_at
+            FROM entities
+            WHERE workspace_id = $1 AND type = $2 AND name = $3
+            LIMIT 1
+            """
+            row = await self._pool.fetchrow(sql_typed, workspace_id, entity_type, name)
         if not row:
             return None
         aliases = json.loads(row["aliases"]) if row["aliases"] else []
@@ -225,17 +246,19 @@ class PostgresStorage(StoragePort):
         return _row_to_event(row) if row else None
 
     async def list_events(
-        self, workspace_id: str = "default", *, limit: int = 50, offset: int = 0, days: int | None = None,
+        self, workspace_id: str = "default", *, limit: int = 50, offset: int = 0,
+        days: int | None = None, sort: str = "recent",
     ) -> list[KnowledgeEvent]:
         params: list = [workspace_id, limit, offset]
         day_clause = ""
         if days is not None:
             day_clause = "AND created_at >= NOW() - $4 * INTERVAL '1 day'"
             params.append(days)
+        order = "relevance DESC NULLS LAST, created_at DESC" if sort == "relevance" else "created_at DESC"
         sql = f"""
         SELECT * FROM events
         WHERE workspace_id = $1 {day_clause}
-        ORDER BY created_at DESC
+        ORDER BY {order}
         LIMIT $2 OFFSET $3
         """
         rows = await self._pool.fetch(sql, *params)
@@ -337,7 +360,9 @@ class PostgresStorage(StoragePort):
         sql = """
         SELECT r.*,
             COALESCE(e_src.title, ent_src.name) AS source_name,
-            COALESCE(e_tgt.title, ent_tgt.name) AS target_name
+            COALESCE(e_tgt.title, ent_tgt.name) AS target_name,
+            ent_src.type AS source_entity_type,
+            ent_tgt.type AS target_entity_type
         FROM relations r
         LEFT JOIN events e_src ON r.source_type = 'event' AND r.source_id = e_src.id
         LEFT JOIN entities ent_src ON r.source_type = 'entity' AND r.source_id = ent_src.id
@@ -687,6 +712,136 @@ class PostgresStorage(StoragePort):
         """
         rows = await self._pool.fetch(sql, entity_id, workspace_id, limit)
         return [_row_to_event(r) for r in rows]
+
+    async def get_thesis_entity_graph(
+        self,
+        workspace_id: str = "default",
+        entity_limit: int = 50,
+        per_thesis_limit: int = 5,
+    ) -> dict:
+        # Step 1: Get top entities per thesis (ranked by mention count within
+        # that thesis), then filter out overly generic entities that appear
+        # in more than half the theses.
+        ent_sql = """
+        WITH thesis_ents AS (
+            SELECT
+                ent.id AS entity_id,
+                ent.name AS entity_name,
+                ent.type AS entity_type,
+                jsonb_array_elements_text(e.thesis_links) AS thesis
+            FROM events e
+            JOIN relations r ON r.source_id = e.id AND r.source_type = 'event'
+                            AND r.target_type = 'entity'
+            JOIN entities ent ON ent.id = r.target_id
+            WHERE e.workspace_id = $1 AND e.thesis_links != '[]'::jsonb
+        ),
+        per_thesis_ranked AS (
+            SELECT entity_id, entity_name, entity_type, thesis,
+                   COUNT(*) AS thesis_mentions,
+                   ROW_NUMBER() OVER (
+                       PARTITION BY thesis ORDER BY COUNT(*) DESC
+                   ) AS rn
+            FROM thesis_ents
+            GROUP BY entity_id, entity_name, entity_type, thesis
+        ),
+        top_per_thesis AS (
+            SELECT * FROM per_thesis_ranked WHERE rn <= $2
+        ),
+        thesis_count AS (
+            SELECT COUNT(DISTINCT thesis) AS total_theses FROM per_thesis_ranked
+        ),
+        entity_thesis_spread AS (
+            SELECT entity_id, COUNT(DISTINCT thesis) AS num_theses
+            FROM per_thesis_ranked
+            GROUP BY entity_id
+        )
+        SELECT t.entity_id, t.entity_name, t.entity_type,
+               array_agg(DISTINCT t.thesis) AS theses,
+               SUM(t.thesis_mentions)::int AS mention_count
+        FROM top_per_thesis t
+        JOIN entity_thesis_spread s ON s.entity_id = t.entity_id
+        CROSS JOIN thesis_count tc
+        WHERE s.num_theses < GREATEST(tc.total_theses - 1, 2)
+        GROUP BY t.entity_id, t.entity_name, t.entity_type
+        ORDER BY mention_count DESC
+        LIMIT $3
+        """
+        ent_rows = await self._pool.fetch(
+            ent_sql, workspace_id, per_thesis_limit, entity_limit
+        )
+        entities = [
+            {
+                "id": str(r["entity_id"]),
+                "name": r["entity_name"],
+                "type": r["entity_type"],
+                "theses": list(r["theses"]),
+                "mention_count": r["mention_count"],
+            }
+            for r in ent_rows
+        ]
+        if not entities:
+            return {"entities": [], "relations": []}
+
+        entity_ids = [r["entity_id"] for r in ent_rows]
+
+        # Step 2: Get entity-entity relations between these entities
+        rel_sql = """
+        SELECT r.id, r.source_type, r.source_id, r.target_type, r.target_id,
+               r.relation, r.confidence,
+               ent_src.name AS source_name, ent_src.type AS source_entity_type,
+               ent_tgt.name AS target_name, ent_tgt.type AS target_entity_type
+        FROM relations r
+        JOIN entities ent_src ON r.source_id = ent_src.id AND r.source_type = 'entity'
+        JOIN entities ent_tgt ON r.target_id = ent_tgt.id AND r.target_type = 'entity'
+        WHERE r.workspace_id = $1
+          AND r.source_id = ANY($2) AND r.target_id = ANY($2)
+        """
+        rel_rows = await self._pool.fetch(rel_sql, workspace_id, entity_ids)
+        relations = [
+            {
+                "id": str(r["id"]),
+                "source_type": r["source_entity_type"],
+                "source_id": str(r["source_id"]),
+                "source_name": r["source_name"],
+                "target_type": r["target_entity_type"],
+                "target_id": str(r["target_id"]),
+                "target_name": r["target_name"],
+                "relation": r["relation"],
+                "confidence": float(r["confidence"]),
+            }
+            for r in rel_rows
+        ]
+        # Step 3: Find thesis co-occurrences (theses that appear together on events)
+        cooccur_sql = """
+        WITH unnested AS (
+            SELECT id, jsonb_array_elements_text(thesis_links) AS thesis
+            FROM events
+            WHERE workspace_id = $1 AND thesis_links != '[]'::jsonb
+        ),
+        pairs AS (
+            SELECT a.thesis AS thesis_a, b.thesis AS thesis_b, COUNT(*) AS shared_events
+            FROM unnested a
+            JOIN unnested b ON a.id = b.id AND a.thesis < b.thesis
+            GROUP BY a.thesis, b.thesis
+            HAVING COUNT(*) >= 2
+        )
+        SELECT * FROM pairs ORDER BY shared_events DESC
+        """
+        cooccur_rows = await self._pool.fetch(cooccur_sql, workspace_id)
+        thesis_links = [
+            {
+                "source": r["thesis_a"],
+                "target": r["thesis_b"],
+                "shared_events": r["shared_events"],
+            }
+            for r in cooccur_rows
+        ]
+
+        return {
+            "entities": entities,
+            "relations": relations,
+            "thesis_links": thesis_links,
+        }
 
     # ------------------------------------------------------------------
     # Digest / analysis operations
@@ -1041,6 +1196,177 @@ class PostgresStorage(StoragePort):
         )
         return row is not None
 
+    # ------------------------------------------------------------------
+    # Phase 6: Thesis CRUD + evidence
+    # ------------------------------------------------------------------
+
+    async def create_thesis(self, thesis: Thesis) -> str:
+        sql = """
+        INSERT INTO theses (id, workspace_id, text, stance, theme, status,
+                            expires_at, created_by, confirmed, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        RETURNING id
+        """
+        row = await self._pool.fetchrow(
+            sql,
+            thesis.id,
+            thesis.workspace_id,
+            thesis.text,
+            thesis.stance.value if hasattr(thesis.stance, "value") else thesis.stance,
+            thesis.theme,
+            thesis.status.value if hasattr(thesis.status, "value") else thesis.status,
+            thesis.expires_at,
+            thesis.created_by.value if hasattr(thesis.created_by, "value") else thesis.created_by,
+            thesis.confirmed,
+            thesis.created_at,
+            thesis.updated_at,
+        )
+        return str(row["id"])
+
+    async def get_thesis(self, thesis_id: str, workspace_id: str = "default"):
+        sql = """
+        SELECT t.*,
+               COALESCE(0.5 + SUM(
+                   CASE WHEN te.impact = 'supports' THEN te.confidence_delta * 0.1
+                        WHEN te.impact = 'contradicts' THEN -te.confidence_delta * 0.1
+                        ELSE 0 END
+               ), 0.5) AS computed_confidence
+        FROM theses t
+        LEFT JOIN thesis_evidence te ON te.thesis_id = t.id
+        WHERE t.id = $1 AND t.workspace_id = $2
+        GROUP BY t.id
+        """
+        row = await self._pool.fetchrow(sql, thesis_id, workspace_id)
+        if not row:
+            return None
+        return _row_to_thesis(row)
+
+    async def list_theses(self, workspace_id: str = "default", *, status=None,
+                          theme=None, confirmed_only: bool = False):
+        conditions = ["t.workspace_id = $1"]
+        params: list = [workspace_id]
+        idx = 2
+        if status:
+            st = status.value if hasattr(status, "value") else status
+            conditions.append(f"t.status = ${idx}")
+            params.append(st)
+            idx += 1
+        if theme:
+            conditions.append(f"t.theme = ${idx}")
+            params.append(theme)
+            idx += 1
+        if confirmed_only:
+            conditions.append("t.confirmed = TRUE")
+        where = " AND ".join(conditions)
+        sql = f"""
+        SELECT t.*,
+               COALESCE(0.5 + SUM(
+                   CASE WHEN te.impact = 'supports' THEN te.confidence_delta * 0.1
+                        WHEN te.impact = 'contradicts' THEN -te.confidence_delta * 0.1
+                        ELSE 0 END
+               ), 0.5) AS computed_confidence
+        FROM theses t
+        LEFT JOIN thesis_evidence te ON te.thesis_id = t.id
+        WHERE {where}
+        GROUP BY t.id
+        ORDER BY t.created_at DESC
+        """
+        rows = await self._pool.fetch(sql, *params)
+        return [_row_to_thesis(r) for r in rows]
+
+    async def update_thesis(self, thesis_id: str, workspace_id: str, *, text=None,
+                            stance=None, status=None, expires_at=None,
+                            theme=None, confirmed=None):
+        sets = []
+        params: list = []
+        idx = 1
+        if text is not None:
+            sets.append(f"text = ${idx}")
+            params.append(text)
+            idx += 1
+        if stance is not None:
+            sets.append(f"stance = ${idx}")
+            params.append(stance.value if hasattr(stance, "value") else stance)
+            idx += 1
+        if status is not None:
+            sets.append(f"status = ${idx}")
+            params.append(status.value if hasattr(status, "value") else status)
+            idx += 1
+        if expires_at is not None:
+            sets.append(f"expires_at = ${idx}")
+            params.append(expires_at)
+            idx += 1
+        if theme is not None:
+            sets.append(f"theme = ${idx}")
+            params.append(theme)
+            idx += 1
+        if confirmed is not None:
+            sets.append(f"confirmed = ${idx}")
+            params.append(confirmed)
+            idx += 1
+        if not sets:
+            return False
+        sets.append("updated_at = NOW()")
+        params.append(thesis_id)
+        params.append(workspace_id)
+        sql = f"""
+        UPDATE theses SET {', '.join(sets)}
+        WHERE id = ${idx} AND workspace_id = ${idx + 1}
+        """
+        result = await self._pool.execute(sql, *params)
+        return result.endswith("1")
+
+    async def delete_thesis(self, thesis_id: str, workspace_id: str) -> bool:
+        result = await self._pool.execute(
+            "DELETE FROM theses WHERE id = $1 AND workspace_id = $2",
+            thesis_id, workspace_id,
+        )
+        return result.endswith("1")
+
+    async def record_evidence(self, evidence: ThesisEvidence) -> str:
+        sql = """
+        INSERT INTO thesis_evidence (id, workspace_id, thesis_id, event_id,
+                                     impact, confidence_delta, rationale, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT (thesis_id, event_id) DO UPDATE
+            SET impact = EXCLUDED.impact,
+                confidence_delta = EXCLUDED.confidence_delta,
+                rationale = EXCLUDED.rationale
+        RETURNING id
+        """
+        row = await self._pool.fetchrow(
+            sql,
+            evidence.id,
+            evidence.workspace_id,
+            evidence.thesis_id,
+            evidence.event_id,
+            evidence.impact.value if hasattr(evidence.impact, "value") else evidence.impact,
+            evidence.confidence_delta,
+            evidence.rationale,
+            evidence.created_at,
+        )
+        return str(row["id"])
+
+    async def get_evidence_for_thesis(self, thesis_id: str, workspace_id: str = "default",
+                                      limit: int = 50):
+        sql = """
+        SELECT * FROM thesis_evidence
+        WHERE thesis_id = $1 AND workspace_id = $2
+        ORDER BY created_at DESC
+        LIMIT $3
+        """
+        rows = await self._pool.fetch(sql, thesis_id, workspace_id, limit)
+        return [_row_to_evidence(r) for r in rows]
+
+    async def get_evidence_for_event(self, event_id: str, workspace_id: str = "default"):
+        sql = """
+        SELECT * FROM thesis_evidence
+        WHERE event_id = $1 AND workspace_id = $2
+        ORDER BY created_at DESC
+        """
+        rows = await self._pool.fetch(sql, event_id, workspace_id)
+        return [_row_to_evidence(r) for r in rows]
+
 
 # ------------------------------------------------------------------
 # Helpers
@@ -1100,6 +1426,7 @@ def _row_to_event(row: asyncpg.Record) -> KnowledgeEvent:
         expires_at=_safe_col(row, "expires_at"),
         user_annotation=_safe_col(row, "user_annotation"),
         user_stance=_safe_col(row, "user_stance"),
+        relevance=float(row["relevance"]) if _safe_col(row, "relevance") is not None else None,
     )
 
 
@@ -1145,4 +1472,38 @@ def _row_to_notification(row: asyncpg.Record) -> Notification:
         created_at=row["created_at"],
         delivered_at=row["delivered_at"],
         acted_at=row["acted_at"],
+    )
+
+
+def _row_to_thesis(row: asyncpg.Record) -> Thesis:
+    """Convert a database row (with computed_confidence) to a Thesis."""
+    conf = float(row["computed_confidence"]) if "computed_confidence" in row.keys() else 0.5
+    conf = max(0.0, min(1.0, conf))
+    return Thesis(
+        text=row["text"],
+        id=str(row["id"]),
+        workspace_id=row["workspace_id"],
+        stance=ThesisStance(row["stance"]),
+        theme=row["theme"],
+        status=ThesisStatus(row["status"]),
+        expires_at=row["expires_at"],
+        created_by=ThesisCreatedBy(row["created_by"]),
+        confirmed=row["confirmed"],
+        confidence=conf,
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _row_to_evidence(row: asyncpg.Record) -> ThesisEvidence:
+    """Convert a database row to a ThesisEvidence."""
+    return ThesisEvidence(
+        thesis_id=str(row["thesis_id"]),
+        event_id=str(row["event_id"]),
+        impact=EvidenceImpact(row["impact"]),
+        id=str(row["id"]),
+        workspace_id=row["workspace_id"],
+        confidence_delta=float(row["confidence_delta"]),
+        rationale=row["rationale"],
+        created_at=row["created_at"],
     )

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api, type Signal } from "../api";
 import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
+import { useToast } from "../Toast";
 
 const VERDICTS = ["useful", "not_useful", "wrong", "save_for_later"] as const;
 const VERDICT_LABELS: Record<string, string> = {
@@ -16,16 +17,17 @@ function PriorityBar({ score }: { score: number }) {
   const color = pct >= 70 ? "var(--status-high)" : pct >= 40 ? "var(--status-medium)" : "var(--status-success)";
   return (
     <div className="flex items-center gap-1.5">
-      <div className="w-14 h-1 rounded-full overflow-hidden" style={{ background: "var(--bg-active)" }}>
-        <div className="h-full rounded-full" style={{ width: `${pct}%`, background: color, opacity: 0.7 }} />
+      <div className="progress-track w-14">
+        <div className="progress-fill" style={{ width: `${pct}%`, background: color, opacity: 0.7 }} />
       </div>
-      <span className="text-meta">{score.toFixed(2)}</span>
+      <span className="text-meta font-data">{score.toFixed(2)}</span>
     </div>
   );
 }
 
 export default function Signals() {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [signals, setSignals] = useState<Signal[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -45,33 +47,31 @@ export default function Signals() {
     try {
       await api.signalFeedback(signalId, verdict);
       setFeedbackFor(null);
-    } catch { /* ignore */ }
+      toast("Feedback submitted", "success");
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "Feedback failed", "error");
+    }
     setSubmitting(false);
   }
 
   return (
     <div>
-      <div className="mb-6">
+      <div className="mb-6 animate-in">
         <h1 className="text-heading">Signals</h1>
         <p className="text-caption mt-1">Connections and patterns detected across your knowledge</p>
       </div>
 
       {error && (
-        <div
-          className="text-[12px] py-3 px-4 rounded-lg mb-4"
-          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
-        >
+        <div className="text-[12px] py-3 px-4 rounded-lg mb-4"
+          style={{ background: "var(--status-high-bg)", color: "var(--status-high)" }}>
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="py-16 text-center text-body">Loading...</div>
+        <div className="py-16 text-center text-body" style={{ color: "var(--text-tertiary)" }}>Loading...</div>
       ) : signals.length === 0 && !error ? (
-        <div
-          className="rounded-xl p-12"
-          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
-        >
+        <div className="card p-12">
           <div className="max-w-md mx-auto text-center">
             <div className="text-3xl mb-4" style={{ color: "var(--text-quaternary)" }}>&mdash;</div>
             <div className="text-[15px] font-medium mb-2" style={{ color: "var(--text-primary)" }}>
@@ -80,10 +80,7 @@ export default function Signals() {
             <div className="text-body mb-6">
               Signals emerge when your knowledge system detects meaningful patterns: contradictions between sources, converging evidence on a topic, or answers to questions you've noted.
             </div>
-            <div
-              className="rounded-lg p-4 text-left space-y-2"
-              style={{ background: "var(--bg-elevated)", border: "1px solid var(--border-subtle)" }}
-            >
+            <div className="card p-4 text-left space-y-2">
               <div className="text-subheading mb-2">How signals are generated</div>
               <div className="flex items-start gap-2">
                 <span className="text-meta mt-0.5">1.</span>
@@ -103,21 +100,12 @@ export default function Signals() {
       ) : (
         <div className="space-y-2">
           {signals.map((s) => (
-            <div
-              key={s.id}
-              className="rounded-xl px-5 py-4 transition-all duration-150"
-              style={{
-                background: "var(--bg-surface)",
-                border: "1px solid var(--border-subtle)",
-              }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--border-default)")}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = "var(--border-subtle)")}
-            >
+            <div key={s.id} className="signal-card px-5 py-4">
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2">
                     <span
-                      className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                      className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
                       style={{ color: "var(--type-thesis)", background: "var(--type-thesis-bg)" }}
                     >
                       {s.signal_type}
@@ -144,10 +132,7 @@ export default function Signals() {
                         <button
                           key={t}
                           onClick={() => navigate(`/events?thesis=${encodeURIComponent(t)}`)}
-                          className="text-[11px] px-2 py-0.5 rounded transition-colors"
-                          style={{ color: "var(--text-accent)", background: "rgba(165,180,252,0.08)" }}
-                          onMouseEnter={(e) => (e.currentTarget.style.background = "rgba(165,180,252,0.16)")}
-                          onMouseLeave={(e) => (e.currentTarget.style.background = "rgba(165,180,252,0.08)")}
+                          className="thesis-chip"
                         >
                           {t}
                         </button>
@@ -157,17 +142,15 @@ export default function Signals() {
 
                   <div className="text-meta">
                     {new Date(s.created_at).toLocaleString()}
-                    <span className="ml-2 font-mono">{s.id.slice(0, 7)}</span>
+                    <span className="ml-2">{s.id.slice(0, 7)}</span>
                     {s.evidence_event_ids.length > 0 && (
                       <span className="ml-2">
                         {s.evidence_event_ids.map((eid, i) => (
                           <button
                             key={eid}
                             onClick={() => setDrawer({ kind: "event", id: eid })}
-                            className="font-mono transition-colors"
+                            className="transition-colors"
                             style={{ color: "var(--text-accent-dim)" }}
-                            onMouseEnter={(e) => (e.currentTarget.style.color = "var(--text-accent)")}
-                            onMouseLeave={(e) => (e.currentTarget.style.color = "var(--text-accent-dim)")}
                           >
                             {i > 0 && ", "}{eid.slice(0, 7)}
                           </button>
@@ -177,9 +160,7 @@ export default function Signals() {
                   </div>
                 </div>
 
-                {/* Actions column */}
                 <div className="shrink-0 flex flex-col gap-1.5">
-                  {/* Context button */}
                   <button
                     onClick={() => setDrawer({
                       kind: "signal",
@@ -188,15 +169,11 @@ export default function Signals() {
                       new_event_id: s.new_event_id,
                       existing_event_id: s.existing_event_id,
                     })}
-                    className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
-                    style={{ color: "var(--text-accent-dim)", border: "1px solid var(--border-accent)" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "rgba(129,140,248,0.08)"; e.currentTarget.style.color = "var(--text-accent)"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-accent-dim)"; }}
+                    className="btn-accent text-[11px] font-medium px-2.5 py-1"
                   >
                     Context
                   </button>
 
-                  {/* Feedback */}
                   {feedbackFor === s.id ? (
                     <>
                       {VERDICTS.map((v) => (
@@ -204,10 +181,7 @@ export default function Signals() {
                           key={v}
                           onClick={() => submitFeedback(s.id, v)}
                           disabled={submitting}
-                          className="text-[11px] px-2.5 py-1 rounded-md transition-colors disabled:opacity-30 text-left"
-                          style={{ color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
-                          onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; e.currentTarget.style.color = "var(--text-primary)"; }}
-                          onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+                          className="btn-ghost text-[11px] px-2.5 py-1 text-left disabled:opacity-30"
                         >
                           {VERDICT_LABELS[v]}
                         </button>
@@ -217,10 +191,7 @@ export default function Signals() {
                   ) : (
                     <button
                       onClick={() => setFeedbackFor(s.id)}
-                      className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
-                      style={{ color: "var(--text-secondary)", border: "1px solid var(--border-default)" }}
-                      onMouseEnter={(e) => { e.currentTarget.style.background = "var(--bg-elevated)"; e.currentTarget.style.color = "var(--text-primary)"; }}
-                      onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-secondary)"; }}
+                      className="btn-ghost text-[11px] font-medium px-2.5 py-1"
                     >
                       Feedback
                     </button>

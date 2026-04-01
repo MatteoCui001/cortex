@@ -16,7 +16,7 @@ embedding:
 llm:
   openrouter:
     api_key: ${LLM_API_KEY}
-    model: gemini-2.5-flash
+    model: gemini-3.1-flash-lite-preview
     base_url: https://generativelanguage.googleapis.com/v1beta/openai
     chat_endpoint: /chat/completions
     thesis_list:

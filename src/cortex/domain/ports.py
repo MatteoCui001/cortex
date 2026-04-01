@@ -11,7 +11,7 @@ from typing import Optional
 from cortex.domain.entities import (
     ContradictionResult, KnowledgeEvent, Entity, Notification,
     NotificationStatus, Relation, SearchResult, SignalFeedback,
-    ThesisCoverage,
+    Thesis, ThesisCoverage, ThesisEvidence,
 )
 
 
@@ -36,9 +36,10 @@ class StoragePort(ABC):
 
     @abstractmethod
     async def list_events(
-        self, workspace_id: str = "default", *, limit: int = 50, offset: int = 0, days: int | None = None,
+        self, workspace_id: str = "default", *, limit: int = 50, offset: int = 0,
+        days: int | None = None, sort: str = "recent",
     ) -> list[KnowledgeEvent]:
-        """List events, newest first. Optional days filter."""
+        """List events. sort=recent (default) or sort=relevance."""
 
     @abstractmethod
     async def semantic_search(
@@ -193,6 +194,15 @@ class StoragePort(ABC):
         limit: int = 50,
     ) -> list[KnowledgeEvent]:
         """Get all events mentioning a specific entity."""
+
+    @abstractmethod
+    async def get_thesis_entity_graph(
+        self,
+        workspace_id: str = "default",
+        entity_limit: int = 50,
+        per_thesis_limit: int = 5,
+    ) -> dict:
+        """Get top entities per thesis, filtering out overly generic ones."""
 
     # ------------------------------------------------------------------
     # Digest operations
@@ -358,6 +368,70 @@ class StoragePort(ABC):
         """True if an active (non-terminal) notification with this dedup_key exists."""
 
 
+    # ------------------------------------------------------------------
+    # Phase 6: Structured thesis CRUD + evidence
+    # ------------------------------------------------------------------
+
+    @abstractmethod
+    async def create_thesis(self, thesis: Thesis) -> str:
+        """Insert a thesis. Returns thesis id."""
+
+    @abstractmethod
+    async def get_thesis(self, thesis_id: str, workspace_id: str = "default") -> Optional[Thesis]:
+        """Get a single thesis by id, with dynamically computed confidence."""
+
+    @abstractmethod
+    async def list_theses(
+        self,
+        workspace_id: str = "default",
+        *,
+        status: Optional[str] = None,
+        theme: Optional[str] = None,
+        confirmed_only: bool = False,
+    ) -> list[Thesis]:
+        """List theses with computed confidence, optionally filtered."""
+
+    @abstractmethod
+    async def update_thesis(
+        self,
+        thesis_id: str,
+        workspace_id: str,
+        *,
+        text: Optional[str] = None,
+        stance: Optional[str] = None,
+        status: Optional[str] = None,
+        expires_at: object = None,
+        theme: object = None,
+        confirmed: Optional[bool] = None,
+    ) -> bool:
+        """Partial update of thesis fields. Returns True if found and updated."""
+
+    @abstractmethod
+    async def delete_thesis(self, thesis_id: str, workspace_id: str) -> bool:
+        """Delete a thesis and its evidence (CASCADE). Returns True if found."""
+
+    @abstractmethod
+    async def record_evidence(self, evidence: ThesisEvidence) -> str:
+        """Insert or update evidence for a (thesis, event) pair. Returns evidence id."""
+
+    @abstractmethod
+    async def get_evidence_for_thesis(
+        self,
+        thesis_id: str,
+        workspace_id: str = "default",
+        limit: int = 50,
+    ) -> list[ThesisEvidence]:
+        """Get evidence items for a thesis, newest first."""
+
+    @abstractmethod
+    async def get_evidence_for_event(
+        self,
+        event_id: str,
+        workspace_id: str = "default",
+    ) -> list[ThesisEvidence]:
+        """Get all thesis impact assessments for a given event."""
+
+
 class FileStorePort(ABC):
     """Port for file storage backend (local filesystem, S3, etc.)."""
 
@@ -426,3 +500,21 @@ class LLMPort(ABC):
     @abstractmethod
     async def summarize(self, content: str, max_length: int = 200) -> str:
         """Generate a summary of the content."""
+
+    @abstractmethod
+    async def generate_theses(self, theme: str, events_text: str) -> list[dict]:
+        """Generate investment theses from events under a theme.
+        Returns: [{"text": str, "stance": str, "rationale": str}]
+        """
+
+    @abstractmethod
+    async def assess_thesis_impact(
+        self,
+        event_content: str,
+        event_summary: str,
+        thesis_text: str,
+        thesis_stance: str,
+    ) -> dict:
+        """Assess whether an event supports, contradicts, or is neutral to a thesis.
+        Returns: {impact: str, confidence_delta: float, rationale: str}
+        """

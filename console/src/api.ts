@@ -57,6 +57,7 @@ export interface Event {
   temporality: string | null;
   user_annotation: string | null;
   raw_input_type: string | null;
+  relevance: number | null;
   created_at: string;
 }
 
@@ -115,6 +116,29 @@ export interface RelationRow {
   target_name: string;
   relation: string;
   confidence: number;
+  source_entity_type?: string;
+  target_entity_type?: string;
+}
+
+export interface GraphEntity {
+  id: string;
+  name: string;
+  type: string;
+  theses: string[];
+  mention_count: number;
+}
+
+export interface ThesisLink {
+  source: string;
+  target: string;
+  shared_events: number;
+}
+
+export interface GraphOverview {
+  entities: GraphEntity[];
+  relations: RelationRow[];
+  thesis_links: ThesisLink[];
+  all_theses: string[];
 }
 
 export interface EntityResult {
@@ -160,12 +184,47 @@ export interface ThesisCoverage {
   recent_event_count: number;
 }
 
+export interface StructuredThesis {
+  id: string;
+  text: string;
+  stance: string;
+  theme: string | null;
+  status: string;
+  expires_at: string | null;
+  created_by: string;
+  confirmed: boolean;
+  confidence: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ThesisEvidence {
+  id: string;
+  thesis_id: string;
+  event_id: string;
+  impact: string;
+  confidence_delta: number;
+  rationale: string | null;
+  created_at: string;
+  event_title: string | null;
+  event_summary: string | null;
+}
+
+async function del(path: string): Promise<unknown> {
+  const res = await fetch(`${BASE}${path}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  return res.json();
+}
+
 // API functions
 export const api = {
   health: () => get<{ status: string }>("/health"),
   stats: () => get<Stats>("/stats"),
-  events: (limit = 50, days?: number) =>
-    get<Event[]>(`/events?limit=${limit}${days ? `&days=${days}` : ""}`),
+  events: (limit = 50, days?: number, sort: string = "recent") =>
+    get<Event[]>(`/events?limit=${limit}&sort=${sort}${days ? `&days=${days}` : ""}`),
   event: (id: string) => get<Event>(`/events/${id}`),
   eventRelated: (id: string, limit = 10) =>
     get<SearchResult[]>(`/search/related/${id}?limit=${limit}`),
@@ -173,6 +232,12 @@ export const api = {
     get<RelationRow[]>(`/entity/${objectId}/graph`),
   searchEntities: (q: string, limit = 20) =>
     get<EntityResult[]>(`/entities/search?q=${encodeURIComponent(q)}&limit=${limit}`),
+  topEntities: (limit = 30) =>
+    get<EntityResult[]>(`/entities/top?limit=${limit}`),
+  graphOverview: () =>
+    get<GraphOverview>("/graph/overview"),
+  entityEvents: (entityId: string, limit = 20) =>
+    get<Event[]>(`/entities/${entityId}/events?limit=${limit}`),
   notifications: (status?: string, limit = 50) =>
     get<Notification[]>(
       `/notifications?limit=${limit}${status ? `&status=${status}` : ""}`
@@ -221,4 +286,27 @@ export const api = {
       model: model || "",
       base_url: baseUrl || "",
     }),
+
+  // Structured theses
+  theses: (status?: string, theme?: string) =>
+    get<StructuredThesis[]>(
+      `/theses?${status ? `status=${status}&` : ""}${theme ? `theme=${encodeURIComponent(theme)}` : ""}`
+    ),
+  createThesis: (data: { text: string; stance?: string; theme?: string; expires_at?: string; created_by?: string }) =>
+    post<StructuredThesis>("/theses", data),
+  getThesis: (id: string) => get<StructuredThesis>(`/theses/${id}`),
+  updateThesis: (id: string, data: Record<string, unknown>) =>
+    patch<StructuredThesis>(`/theses/${id}`, data),
+  resolveThesis: (id: string) => post<StructuredThesis>(`/theses/${id}/resolve`),
+  invalidateThesis: (id: string) => post<StructuredThesis>(`/theses/${id}/invalidate`),
+  confirmThesis: (id: string) => post<StructuredThesis>(`/theses/${id}/confirm`),
+  deleteThesis: (id: string) => del(`/theses/${id}`),
+  thesisEvidenceList: (id: string, limit = 50) =>
+    get<ThesisEvidence[]>(`/theses/${id}/evidence?limit=${limit}`),
+  thesisSuggestions: (minEvents = 3) =>
+    get<{ theme: string; event_count: number }[]>(`/theses/suggestions?min_events=${minEvents}`),
+  generateThesesForTheme: (theme: string) =>
+    post<StructuredThesis[]>(`/theses/generate/${encodeURIComponent(theme)}`),
+  generateThesesAll: () =>
+    post<{ generated: Record<string, number> }>("/theses/generate-all"),
 };

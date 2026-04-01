@@ -105,6 +105,12 @@ class ContradictionDetector:
         from cortex.use_cases.value_scorer import score_signals
         results = score_signals(results, new_event)
 
+        # Drop low-value signals where neither event has thesis links
+        results = [
+            r for r in results
+            if r.priority_score >= 0.4 or new_event.thesis_links
+        ]
+
         return results
 
     async def _classify_signal(
@@ -194,10 +200,13 @@ def _filter_candidates(
             continue
 
         filtered.append(sr)
-        if len(filtered) >= _CANDIDATE_MAX:
-            break
 
-    return filtered
+    # Prioritize thesis-linked candidates within the cap
+    filtered.sort(
+        key=lambda sr: bool(getattr(sr.event, "thesis_links", None)),
+        reverse=True,
+    )
+    return filtered[:_CANDIDATE_MAX]
 
 
 # ---------------------------------------------------------------------------

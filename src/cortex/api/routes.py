@@ -9,7 +9,7 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from cortex.use_cases.ingest import IngestUseCase
@@ -74,6 +74,7 @@ class EventResponse(BaseModel):
     temporality: Optional[str] = None
     user_annotation: Optional[str] = None
     raw_input_type: Optional[str] = None
+    relevance: Optional[float] = None
     created_at: str
 
 class SearchResultResponse(BaseModel):
@@ -242,6 +243,41 @@ async def search_entities(
     ]
 
 
+@router.get("/graph/overview")
+async def graph_overview(request: Request):
+    """Get thesis-centered entity graph for the overview page."""
+    storage = request.app.state.storage
+    workspace_id = getattr(request.state, "workspace_id", "default")
+    data = await storage.get_thesis_entity_graph(
+        workspace_id, entity_limit=50, per_thesis_limit=8
+    )
+    # Include all configured theses so frontend can show them even without entities
+    llm = request.app.state.llm
+    cfg = request.app.state.config
+    llm_cfg = cfg.get("llm", {}).get("openrouter", {})
+    all_theses = getattr(llm, "_thesis_list", []) if llm else llm_cfg.get("thesis_list", [])
+    data["all_theses"] = all_theses or []
+    return data
+
+
+@router.get("/entities/top", response_model=list[EntityResponse])
+async def top_entities(request: Request, limit: int = Query(30, ge=1, le=200)):
+    """Get top entities by mention count for overview graph."""
+    all_entities = await request.app.state.storage.get_all_entities()
+    sorted_ents = sorted(all_entities, key=lambda e: e["mention_count"], reverse=True)[:limit]
+    return [
+        EntityResponse(
+            id=e["id"],
+            type=e["type"],
+            name=e["name"],
+            aliases=[],
+            score=1.0,
+            mention_count=e["mention_count"],
+        )
+        for e in sorted_ents
+    ]
+
+
 @router.get("/entities/{entity_id}/events")
 async def entity_events(entity_id: str, request: Request, limit: int = 50):
     """Get all events mentioning a specific entity."""
@@ -254,6 +290,7 @@ async def entity_events(entity_id: str, request: Request, limit: int = 50):
 @router.post("/events", response_model=EventResponse, status_code=201)
 async def create_event(body: EventCreate, request: Request):
     """Create a new knowledge event. Primary agent write path."""
+    import asyncio as _aio
     ingest_uc = request.app.state.ingest
     event = await ingest_uc.import_text(
         title=body.title,
@@ -261,6 +298,35 @@ async def create_event(body: EventCreate, request: Request):
         source=body.source,
         event_type=body.event_type,
     )
+    if not event:
+        raise HTTPException(status_code=422, detail="Content filtered by quality gate")
+
+    # Background: thesis evaluation + contradiction detection (same as /events/ingest)
+    workspace = request.app.state.config.get("workspace", "default")
+
+    async def _bg_evaluate():
+        log = logging.getLogger(__name__)
+        # Thesis impact
+        try:
+            from cortex.use_cases.thesis import ThesisUseCase
+            thesis_uc = ThesisUseCase(
+                request.app.state.storage, workspace,
+                llm=request.app.state.llm,
+            )
+            evidence = await thesis_uc.evaluate_event(event)
+            if evidence:
+                log.info("POST /events thesis_evaluate: %d evidence(s) for %s", len(evidence), event.id)
+        except Exception:
+            log.exception("POST /events thesis evaluate failed for %s", event.id)
+        # Contradiction detection
+        try:
+            signals = await ingest_uc.post_ingest_analyze(event)
+            if signals:
+                log.info("POST /events post_ingest_analyze: %d signal(s) for %s", len(signals), event.id)
+        except Exception:
+            log.exception("POST /events post_ingest_analyze failed for %s", event.id)
+
+    _aio.create_task(_bg_evaluate())
     return _event_to_response(event)
 
 
@@ -270,11 +336,13 @@ async def list_events(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     days: Optional[int] = Query(None, ge=1, le=365),
+    sort: str = Query("recent", pattern="^(recent|relevance)$"),
 ):
-    """List recent events, newest first."""
+    """List events. sort=recent (default) or sort=relevance."""
     workspace = request.app.state.config.get("workspace", "default")
     events = await request.app.state.storage.list_events(
         workspace_id=workspace, limit=limit, offset=offset, days=days,
+        sort=sort,
     )
     return [_event_to_response(e) for e in events]
 
@@ -470,6 +538,43 @@ async def ingest_event(body: IngestRequest, request: Request):
                     )
         except Exception:
             log.exception("post_ingest_analyze failed for event %s", event.id)
+
+        # Thesis impact evaluation
+        try:
+            from cortex.use_cases.thesis import ThesisUseCase
+            thesis_uc = ThesisUseCase(
+                request.app.state.storage, workspace,
+                llm=request.app.state.llm,
+            )
+            evidence = await thesis_uc.evaluate_event(event)
+            if evidence:
+                log.info(
+                    "thesis_evaluate: %d evidence(s) for event %s",
+                    len(evidence), event.id,
+                )
+                # Create notifications for significant thesis evidence
+                from cortex.use_cases.push_detector import PushDetector as _PD
+                from cortex.use_cases.notification_manager import NotificationManager as _NM
+                _det = _PD(request.app.state.storage, workspace)
+                # Build thesis_id -> text lookup
+                theses = await request.app.state.storage.list_theses(workspace, confirmed_only=True)
+                thesis_texts = {t.id: t.text for t in theses}
+                thesis_pushes = _det.check_thesis_evidence(evidence, thesis_texts)
+                if thesis_pushes:
+                    _wh = request.app.state.config.get("notifications", {}).get("webhook", {})
+                    _nm = _NM(request.app.state.storage, _det, webhook_cfg=_wh, workspace_id=workspace)
+                    for push in thesis_pushes:
+                        dedup_key = f"thesis_evidence:{push.related_event_ids[0]}:{push.title[:30]}"
+                        if await request.app.state.storage.check_dedup(workspace, dedup_key):
+                            continue
+                        notif = _nm._push_to_notification(push, dedup_key)
+                        await request.app.state.storage.insert_notification(notif)
+                    log.info(
+                        "thesis_evidence: %d notification(s) for event %s",
+                        len(thesis_pushes), event.id,
+                    )
+        except Exception:
+            log.exception("thesis evaluate_event failed for event %s", event.id)
 
     asyncio.create_task(_background_analyze())
 
@@ -840,5 +945,301 @@ def _event_to_response(event) -> EventResponse:
         temporality=getattr(event, "temporality", None),
         user_annotation=getattr(event, "user_annotation", None),
         raw_input_type=getattr(event, "raw_input_type", None),
+        relevance=getattr(event, "relevance", None),
         created_at=event.created_at.isoformat() if hasattr(event.created_at, "isoformat") else str(event.created_at),
     )
+
+
+# ------------------------------------------------------------------
+# Phase 6: Structured Theses
+# ------------------------------------------------------------------
+
+class ThesisCreate(BaseModel):
+    text: str
+    stance: str = "neutral"
+    theme: Optional[str] = None
+    expires_at: Optional[str] = None
+    created_by: str = "manual"
+
+class ThesisPatch(BaseModel):
+    text: Optional[str] = None
+    stance: Optional[str] = None
+    theme: Optional[str] = None
+    expires_at: Optional[str] = None
+    confirmed: Optional[bool] = None
+
+class ThesisResponse(BaseModel):
+    id: str
+    text: str
+    stance: str
+    theme: Optional[str] = None
+    status: str
+    expires_at: Optional[str] = None
+    created_by: str
+    confirmed: bool
+    confidence: float
+    created_at: str
+    updated_at: str
+
+class ThesisEvidenceResponse(BaseModel):
+    id: str
+    thesis_id: str
+    event_id: str
+    impact: str
+    confidence_delta: float
+    rationale: Optional[str] = None
+    created_at: str
+    event_title: Optional[str] = None
+    event_summary: Optional[str] = None
+
+
+def _thesis_to_response(t) -> dict:
+    return ThesisResponse(
+        id=t.id,
+        text=t.text,
+        stance=t.stance.value if hasattr(t.stance, "value") else t.stance,
+        theme=t.theme,
+        status=t.status.value if hasattr(t.status, "value") else t.status,
+        expires_at=t.expires_at.isoformat() if t.expires_at and hasattr(t.expires_at, "isoformat") else None,
+        created_by=t.created_by.value if hasattr(t.created_by, "value") else t.created_by,
+        confirmed=t.confirmed,
+        confidence=round(t.confidence, 4),
+        created_at=t.created_at.isoformat() if t.created_at and hasattr(t.created_at, "isoformat") else "",
+        updated_at=t.updated_at.isoformat() if t.updated_at and hasattr(t.updated_at, "isoformat") else "",
+    )
+
+
+def _evidence_to_response(e) -> dict:
+    return ThesisEvidenceResponse(
+        id=e.id,
+        thesis_id=e.thesis_id,
+        event_id=e.event_id,
+        impact=e.impact.value if hasattr(e.impact, "value") else e.impact,
+        confidence_delta=round(e.confidence_delta, 4),
+        rationale=e.rationale,
+        created_at=e.created_at.isoformat() if e.created_at and hasattr(e.created_at, "isoformat") else "",
+    )
+
+
+def _get_thesis_uc(request: Request):
+    from cortex.use_cases.thesis import ThesisUseCase
+    storage = request.app.state.storage
+    workspace = request.app.state.workspace
+    llm = getattr(request.app.state, "llm", None)
+    return ThesisUseCase(storage, workspace, llm=llm)
+
+
+@router.get("/theses", response_model=list[ThesisResponse])
+async def list_theses(
+    request: Request,
+    status: Optional[str] = None,
+    theme: Optional[str] = None,
+    confirmed_only: bool = False,
+):
+    uc = _get_thesis_uc(request)
+    theses = await uc.list(status=status, theme=theme, confirmed_only=confirmed_only)
+    return [_thesis_to_response(t) for t in theses]
+
+
+@router.post("/theses", response_model=ThesisResponse, status_code=201)
+async def create_thesis(body: ThesisCreate, request: Request):
+    from datetime import datetime, timezone
+    uc = _get_thesis_uc(request)
+    expires = None
+    if body.expires_at:
+        expires = datetime.fromisoformat(body.expires_at)
+    thesis = await uc.create(
+        text=body.text,
+        stance=body.stance,
+        theme=body.theme,
+        expires_at=expires,
+        created_by=body.created_by,
+    )
+    return _thesis_to_response(thesis)
+
+
+@router.post("/theses/generate/{theme}")
+async def generate_theses_for_theme(theme: str, request: Request):
+    """Generate opinionated thesis statements from events under a theme using LLM."""
+    if not getattr(request.app.state, "llm", None):
+        raise HTTPException(503, "LLM not configured — set LLM_API_KEY to enable thesis generation")
+    uc = _get_thesis_uc(request)
+    created = await uc.generate_from_theme(theme)
+    return [_thesis_to_response(t) for t in created]
+
+
+@router.post("/theses/generate-all")
+async def generate_theses_all(request: Request):
+    """Generate theses for all configured themes."""
+    cfg = request.app.state.config
+    themes = cfg.get("llm", {}).get("openrouter", {}).get("thesis_list", [])
+    if not themes:
+        return {"generated": {}}
+    uc = _get_thesis_uc(request)
+    results = await uc.generate_all_themes(themes)
+    return {"generated": results}
+
+
+@router.get("/theses/suggestions")
+async def thesis_suggestions(request: Request, min_events: int = Query(3, ge=1)):
+    """Return themes with enough events that could be used to generate theses."""
+    storage = request.app.state.storage
+    workspace = request.app.state.workspace
+    coverages = await storage.thesis_coverage(workspace)
+    # Filter to themes with enough events
+    suggestions = [
+        {"theme": tc.thesis_name, "event_count": tc.event_count}
+        for tc in coverages
+        if tc.event_count >= min_events
+    ]
+    return suggestions
+
+
+@router.get("/theses/{thesis_id}", response_model=ThesisResponse)
+async def get_thesis(thesis_id: str, request: Request):
+    uc = _get_thesis_uc(request)
+    t = await uc.get(thesis_id)
+    if not t:
+        raise HTTPException(404, "Thesis not found")
+    return _thesis_to_response(t)
+
+
+@router.patch("/theses/{thesis_id}", response_model=ThesisResponse)
+async def update_thesis(thesis_id: str, body: ThesisPatch, request: Request):
+    from datetime import datetime
+    uc = _get_thesis_uc(request)
+    fields = {}
+    if body.text is not None:
+        fields["text"] = body.text
+    if body.stance is not None:
+        fields["stance"] = body.stance
+    if body.theme is not None:
+        fields["theme"] = body.theme
+    if body.expires_at is not None:
+        fields["expires_at"] = datetime.fromisoformat(body.expires_at)
+    if body.confirmed is not None:
+        fields["confirmed"] = body.confirmed
+    if not fields:
+        raise HTTPException(400, "No fields to update")
+    ok = await uc.update(thesis_id, **fields)
+    if not ok:
+        raise HTTPException(404, "Thesis not found")
+    t = await uc.get(thesis_id)
+    return _thesis_to_response(t)
+
+
+@router.post("/theses/{thesis_id}/resolve", response_model=ThesisResponse)
+async def resolve_thesis(thesis_id: str, request: Request):
+    uc = _get_thesis_uc(request)
+    ok = await uc.resolve(thesis_id)
+    if not ok:
+        raise HTTPException(404, "Thesis not found")
+    t = await uc.get(thesis_id)
+    return _thesis_to_response(t)
+
+
+@router.post("/theses/{thesis_id}/invalidate", response_model=ThesisResponse)
+async def invalidate_thesis(thesis_id: str, request: Request):
+    uc = _get_thesis_uc(request)
+    ok = await uc.invalidate(thesis_id)
+    if not ok:
+        raise HTTPException(404, "Thesis not found")
+    t = await uc.get(thesis_id)
+    return _thesis_to_response(t)
+
+
+@router.post("/theses/{thesis_id}/confirm", response_model=ThesisResponse)
+async def confirm_thesis(thesis_id: str, request: Request, background_tasks: BackgroundTasks):
+    uc = _get_thesis_uc(request)
+    ok = await uc.confirm(thesis_id)
+    if not ok:
+        raise HTTPException(404, "Thesis not found")
+    t = await uc.get(thesis_id)
+
+    # Auto-backfill: evaluate recent events against newly confirmed thesis
+    llm = getattr(request.app.state, "llm", None)
+    if llm:
+        storage = request.app.state.storage
+        workspace = request.app.state.workspace
+
+        async def _backfill_for_thesis():
+            from cortex.use_cases.thesis import ThesisUseCase
+            thesis_uc = ThesisUseCase(storage, workspace, llm=llm)
+            events = await storage.list_events(workspace_id=workspace, limit=50, offset=0, sort="recent")
+            count = 0
+            for event in events:
+                try:
+                    evidence = await thesis_uc.evaluate_event(event)
+                    count += len(evidence)
+                except Exception:
+                    pass
+            if count:
+                logger.info("Backfill after confirm: %d evidence(s) for thesis '%s'", count, t.text[:60])
+
+        background_tasks.add_task(_backfill_for_thesis)
+
+    return _thesis_to_response(t)
+
+
+@router.delete("/theses/{thesis_id}")
+async def delete_thesis(thesis_id: str, request: Request):
+    uc = _get_thesis_uc(request)
+    ok = await uc.delete(thesis_id)
+    if not ok:
+        raise HTTPException(404, "Thesis not found")
+    return {"status": "deleted"}
+
+
+@router.get("/theses/{thesis_id}/evidence", response_model=list[ThesisEvidenceResponse])
+async def thesis_evidence_list(thesis_id: str, request: Request, limit: int = 50):
+    uc = _get_thesis_uc(request)
+    storage = request.app.state.storage
+    workspace = request.app.state.workspace
+    evidence = await uc.get_evidence(thesis_id, limit=limit)
+    # Enrich evidence with event title/summary
+    results = []
+    for e in evidence:
+        resp = _evidence_to_response(e)
+        try:
+            event = await storage.get_event(e.event_id, workspace)
+            if event:
+                resp.event_title = event.title
+                resp.event_summary = event.summary
+        except Exception:
+            pass
+        results.append(resp)
+    return results
+
+
+@router.post("/admin/backfill-evidence")
+async def backfill_thesis_evidence(
+    request: Request,
+    limit: int = Query(100, ge=1, le=1000),
+):
+    """Backfill thesis evidence for existing events that have thesis_links but no evidence."""
+    workspace = request.app.state.config.get("workspace", "default")
+    storage = request.app.state.storage
+    llm = request.app.state.llm
+    if not llm:
+        raise HTTPException(400, "LLM not configured — cannot evaluate theses")
+
+    from cortex.use_cases.thesis import ThesisUseCase
+    thesis_uc = ThesisUseCase(storage, workspace, llm=llm)
+
+    # Get events that have thesis_links (candidates for evidence)
+    events = await storage.list_events(
+        workspace_id=workspace, limit=limit, offset=0, sort="recent",
+    )
+    stats = {"evaluated": 0, "evidence_created": 0, "skipped": 0, "errors": 0}
+    for event in events:
+        try:
+            evidence = await thesis_uc.evaluate_event(event)
+            if evidence:
+                stats["evaluated"] += 1
+                stats["evidence_created"] += len(evidence)
+            else:
+                stats["skipped"] += 1
+        except Exception as e:
+            logger.warning("Backfill failed for event %s: %s", event.id, e)
+            stats["errors"] += 1
+    return stats

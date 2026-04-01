@@ -1,4 +1,8 @@
+import { useState, useEffect } from "react";
 import { Routes, Route, NavLink, Navigate } from "react-router-dom";
+import { ToastProvider } from "./Toast";
+import { api } from "./api";
+import Onboarding from "./pages/Onboarding";
 import Overview from "./pages/Overview";
 import Digest from "./pages/Digest";
 import Inbox from "./pages/Inbox";
@@ -9,40 +13,66 @@ import Graph from "./pages/Graph";
 import Ingest from "./pages/Ingest";
 import Theses from "./pages/Theses";
 import Settings from "./pages/Settings";
+import EventDetail from "./pages/EventDetail";
 
 const navItems = [
-  { to: "/overview", label: "Overview", desc: "Dashboard" },
-  { to: "/digest", label: "Digest", desc: "Brief" },
-  { to: "/theses", label: "Theses", desc: "Portfolio" },
-  { to: "/inbox", label: "Inbox", desc: "Alerts" },
-  { to: "/signals", label: "Signals", desc: "Insights" },
-  { to: "/events", label: "Events", desc: "Store" },
-  { to: "/graph", label: "Graph", desc: "Entities" },
-  { to: "/search", label: "Search", desc: "Query" },
-  { to: "/ingest", label: "Ingest", desc: "Add" },
-  { to: "/settings", label: "Settings", desc: "Config" },
+  { to: "/overview", label: "Overview", desc: "" },
+  { to: "/digest", label: "Digest", desc: "" },
+  { to: "/theses", label: "Theses", desc: "" },
+  { to: "/inbox", label: "Inbox", desc: "" },
+  { to: "/signals", label: "Signals", desc: "" },
+  { to: "/events", label: "Events", desc: "" },
+  { to: "/graph", label: "Graph", desc: "" },
+  { to: "/search", label: "Search", desc: "" },
+  { to: "/ingest", label: "Ingest", desc: "" },
+  { to: "/settings", label: "Settings", desc: "" },
 ];
 
 export default function App() {
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [checkingOnboarding, setCheckingOnboarding] = useState(true);
+
+  useEffect(() => {
+    api.stats().then((stats) => {
+      if (stats.events === 0) setShowOnboarding(true);
+    }).catch(() => {}).finally(() => setCheckingOnboarding(false));
+  }, []);
+
+  if (checkingOnboarding) return null;
+  if (showOnboarding) {
+    return (
+      <ToastProvider>
+        <Onboarding onComplete={() => setShowOnboarding(false)} />
+      </ToastProvider>
+    );
+  }
+
   return (
+    <ToastProvider>
     <div className="min-h-screen flex flex-col md:flex-row" style={{ background: "var(--bg-base)" }}>
       {/* Sidebar */}
       <nav
-        className="hidden md:flex w-52 shrink-0 flex-col border-r"
-        style={{ background: "var(--bg-base)", borderColor: "var(--border-subtle)" }}
+        className="hidden md:flex w-56 shrink-0 flex-col border-r"
+        style={{ background: "var(--bg-surface)", borderColor: "var(--border-subtle)" }}
       >
         {/* Brand */}
-        <div className="px-4 pt-6 pb-5 flex items-center gap-3">
+        <div className="px-5 pt-6 pb-5 flex items-center gap-3">
           <div className="brand-glyph">C</div>
           <div>
-            <div className="text-[14px] font-bold tracking-tight" style={{ color: "var(--text-primary)" }}>
+            <div
+              className="text-[15px] font-semibold tracking-tight"
+              style={{ color: "var(--text-primary)", fontFamily: "'Crimson Pro', Georgia, serif" }}
+            >
               Cortex
             </div>
             <div className="font-data text-[10px]" style={{ color: "var(--text-quaternary)" }}>
-              v0.1.0-beta
+              Knowledge Engine
             </div>
           </div>
         </div>
+
+        {/* Divider */}
+        <div className="mx-4 mb-2" style={{ height: 1, background: "var(--border-subtle)" }} />
 
         {/* Nav */}
         <div className="flex-1 px-3 flex flex-col gap-0.5 overflow-y-auto">
@@ -59,8 +89,10 @@ export default function App() {
         </div>
 
         {/* Footer */}
-        <div className="px-4 py-3">
-          <div className="text-[10px] font-data" style={{ color: "var(--text-quaternary)" }}>Knowledge Infrastructure</div>
+        <div className="px-5 py-4">
+          <div className="text-[10px] font-data" style={{ color: "var(--text-quaternary)" }}>
+            Knowledge Infrastructure
+          </div>
         </div>
       </nav>
 
@@ -74,6 +106,7 @@ export default function App() {
             <Route path="/inbox" element={<Inbox />} />
             <Route path="/signals" element={<Signals />} />
             <Route path="/events" element={<Events />} />
+            <Route path="/events/:id" element={<EventDetail />} />
             <Route path="/graph" element={<Graph />} />
             <Route path="/theses" element={<Theses />} />
             <Route path="/search" element={<Search />} />
@@ -102,5 +135,6 @@ export default function App() {
         ))}
       </nav>
     </div>
+    </ToastProvider>
   );
 }

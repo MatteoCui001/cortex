@@ -1,13 +1,14 @@
 import { useEffect, useState, useCallback } from "react";
 import { api, type Notification } from "../api";
 import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
+import { useToast } from "../Toast";
 
 const STATUS_FILTERS = ["all", "pending", "delivered", "read", "acked", "dismissed"] as const;
 const PRIORITY_FILTERS = ["all", "high", "medium", "low"] as const;
 
 function PriorityDot({ priority }: { priority: string }) {
-  const color = priority === "high" ? "var(--status-high)" : priority === "medium" ? "var(--status-medium)" : "var(--text-quaternary)";
-  return <span className="inline-block w-2 h-2 rounded-full shrink-0" style={{ background: color }} />;
+  const cls = priority === "high" ? "dot-high" : priority === "medium" ? "dot-medium" : "dot-low";
+  return <span className={`dot ${cls}`} />;
 }
 
 function StatusLabel({ status }: { status: string }) {
@@ -18,22 +19,18 @@ function StatusLabel({ status }: { status: string }) {
     acked: "var(--text-tertiary)",
     dismissed: "var(--text-quaternary)",
   };
-  return <span className="text-[10px] font-medium" style={{ color: colorMap[status] ?? "var(--text-tertiary)" }}>{status}</span>;
+  return <span className="text-[10px] font-semibold font-data" style={{ color: colorMap[status] ?? "var(--text-tertiary)" }}>{status}</span>;
 }
 
 function FilterBar({ options, value, onChange }: { options: readonly string[]; value: string; onChange: (v: string) => void }) {
   return (
-    <div className="flex gap-0.5 p-0.5 rounded-lg" style={{ background: "var(--bg-surface)" }}>
+    <div className="segment-control">
       {options.map((s) => (
         <button
           key={s}
           onClick={() => onChange(s)}
-          className="text-[11px] px-2.5 py-1 rounded-md transition-all duration-150"
-          style={{
-            background: value === s ? "var(--bg-elevated)" : "transparent",
-            color: value === s ? "var(--text-primary)" : "var(--text-tertiary)",
-            fontWeight: value === s ? 500 : 400,
-          }}
+          className="segment-btn"
+          data-active={value === s ? "true" : undefined}
         >
           {s}
         </button>
@@ -50,6 +47,7 @@ export default function Inbox() {
   const [error, setError] = useState<string | null>(null);
   const [acting, setActing] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
+  const { toast } = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -71,7 +69,9 @@ export default function Inbox() {
     try {
       const updated = await api.notificationAction(id, action);
       setNotifications((prev) => prev.map((n) => (n.id === id ? updated : n)));
-    } catch { /* ignore */ }
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "Action failed", "error");
+    }
     setActing(null);
   }
 
@@ -84,63 +84,50 @@ export default function Inbox() {
       const targetStatus = statusFilter === "all" ? "pending" : statusFilter;
       await api.bulkNotificationAction(action, undefined, targetStatus);
       await load();
-    } catch { /* ignore */ }
+    } catch (e: unknown) {
+      toast(e instanceof Error ? e.message : "Bulk action failed", "error");
+    }
     setBulkActing(false);
   }
 
-  // Apply priority filter on top of status filter
   const filtered = priorityFilter === "all"
     ? notifications
     : notifications.filter((n) => n.priority === priorityFilter);
 
-  // Split into needs-attention vs rest
   const needsAttention = filtered.filter((n) => n.status === "pending" || n.status === "delivered");
   const rest = filtered.filter((n) => n.status !== "pending" && n.status !== "delivered");
 
   return (
     <div>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-5 animate-in">
         <div>
           <h1 className="text-heading">Inbox</h1>
           <p className="text-caption mt-1">Triage notifications from your knowledge system</p>
         </div>
-        <button
-          onClick={load}
-          className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors"
-          style={{
-            color: "var(--text-secondary)",
-            background: "var(--bg-surface)",
-            border: "1px solid var(--border-default)",
-          }}
-        >
+        <button onClick={load} className="btn-ghost text-[11px] font-medium px-3 py-1.5">
           Refresh
         </button>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 mb-6">
+      <div className="flex flex-wrap items-center gap-3 mb-6 animate-in animate-in-delay-1">
         <FilterBar options={STATUS_FILTERS} value={statusFilter} onChange={setStatusFilter} />
         <FilterBar options={PRIORITY_FILTERS} value={priorityFilter} onChange={setPriorityFilter} />
         <span className="text-meta ml-auto">{filtered.length} notifications</span>
       </div>
 
-      {/* Batch actions */}
       {needsAttention.length > 0 && (
-        <div className="flex items-center gap-2 mb-4">
+        <div className="flex items-center gap-2 mb-4 animate-in animate-in-delay-2">
           <button
             onClick={() => handleBulkAction("read")}
             disabled={bulkActing}
-            className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-30"
-            style={{ color: "var(--text-secondary)", background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}
+            className="btn-ghost text-[11px] font-medium px-3 py-1.5 disabled:opacity-30"
           >
             Mark all read
           </button>
           <button
             onClick={() => handleBulkAction("dismiss")}
             disabled={bulkActing}
-            className="text-[11px] font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-30"
-            style={{ color: "var(--text-secondary)", background: "var(--bg-surface)", border: "1px solid var(--border-default)" }}
+            className="btn-ghost text-[11px] font-medium px-3 py-1.5 disabled:opacity-30"
           >
             Dismiss all
           </button>
@@ -149,21 +136,16 @@ export default function Inbox() {
       )}
 
       {error && (
-        <div
-          className="text-[12px] py-3 px-4 rounded-lg mb-4"
-          style={{ background: "var(--bg-elevated)", color: "var(--status-high, #f87171)" }}
-        >
+        <div className="text-[12px] py-3 px-4 rounded-lg mb-4"
+          style={{ background: "var(--status-high-bg)", color: "var(--status-high)" }}>
           {error}
         </div>
       )}
 
       {loading ? (
-        <div className="py-16 text-center text-body">Loading...</div>
+        <div className="py-16 text-center text-body" style={{ color: "var(--text-tertiary)" }}>Loading...</div>
       ) : filtered.length === 0 && !error ? (
-        <div
-          className="rounded-xl p-12 text-center"
-          style={{ background: "var(--bg-surface)", border: "1px solid var(--border-subtle)" }}
-        >
+        <div className="card p-12 text-center">
           <div className="text-body">No notifications</div>
           <div className="text-meta mt-1">
             {statusFilter === "all" && priorityFilter === "all"
@@ -173,7 +155,6 @@ export default function Inbox() {
         </div>
       ) : (
         <>
-          {/* Needs attention section */}
           {needsAttention.length > 0 && statusFilter === "all" && (
             <div className="mb-6">
               <div className="text-subheading mb-3">Needs Attention ({needsAttention.length})</div>
@@ -192,7 +173,6 @@ export default function Inbox() {
             </div>
           )}
 
-          {/* Other / all */}
           {(statusFilter !== "all" ? filtered : rest).length > 0 && (
             <div>
               {statusFilter === "all" && rest.length > 0 && (
@@ -219,8 +199,6 @@ export default function Inbox() {
   );
 }
 
-/* ── Notification card component ── */
-
 function NotifCard({
   n,
   acting,
@@ -236,22 +214,15 @@ function NotifCard({
 }) {
   return (
     <div
-      className="rounded-xl px-5 py-4 transition-all duration-150"
-      style={{
-        background: "var(--bg-surface)",
-        border: highlight
-          ? "1px solid var(--border-accent)"
-          : "1px solid var(--border-subtle)",
-      }}
-      onMouseEnter={(e) => (e.currentTarget.style.borderColor = "var(--border-default)")}
-      onMouseLeave={(e) => (e.currentTarget.style.borderColor = highlight ? "rgba(129,140,248,0.2)" : "var(--border-subtle)")}
+      className="notif-card px-5 py-4"
+      data-highlight={highlight ? "true" : undefined}
     >
       <div className="flex items-start gap-3">
         <PriorityDot priority={n.priority} />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1">
             <StatusLabel status={n.status} />
-            <span className="text-meta font-mono">{n.id.slice(0, 7)}</span>
+            <span className="text-meta">{n.id.slice(0, 7)}</span>
             {n.related_event_ids.length > 0 && (
               <span className="text-meta">{n.related_event_ids.length} event{n.related_event_ids.length > 1 ? "s" : ""}</span>
             )}
@@ -270,24 +241,8 @@ function NotifCard({
           </div>
         </div>
 
-        {/* Actions */}
         <div className="flex flex-col gap-1.5 shrink-0">
-          <button
-            onClick={onContext}
-            className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors"
-            style={{
-              color: "var(--text-accent-dim)",
-              border: "1px solid var(--border-accent)",
-            }}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "rgba(129,140,248,0.08)";
-              e.currentTarget.style.color = "var(--text-accent)";
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "transparent";
-              e.currentTarget.style.color = "var(--text-accent-dim)";
-            }}
-          >
+          <button onClick={onContext} className="btn-accent text-[11px] font-medium px-2.5 py-1">
             Context
           </button>
           {(n.status === "pending" || n.status === "delivered") && (
@@ -299,19 +254,7 @@ function NotifCard({
                     key={label}
                     onClick={() => onAction(n.id, action)}
                     disabled={acting === n.id}
-                    className="text-[11px] font-medium px-2.5 py-1 rounded-md transition-colors disabled:opacity-30"
-                    style={{
-                      color: "var(--text-secondary)",
-                      border: "1px solid var(--border-default)",
-                    }}
-                    onMouseEnter={(e) => {
-                      e.currentTarget.style.background = "var(--bg-elevated)";
-                      e.currentTarget.style.color = "var(--text-primary)";
-                    }}
-                    onMouseLeave={(e) => {
-                      e.currentTarget.style.background = "transparent";
-                      e.currentTarget.style.color = "var(--text-secondary)";
-                    }}
+                    className="btn-ghost text-[11px] font-medium px-2.5 py-1 disabled:opacity-30"
                   >
                     {label}
                   </button>
