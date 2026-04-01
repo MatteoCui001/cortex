@@ -36,7 +36,7 @@ services:
 
   wechat:
     build:
-      context: ./cortex-wechat
+      context: ../cortex-wechat
       dockerfile: Dockerfile
     environment:
       - CORTEX_BASE_URL=http://cortex:8420/api/v1
