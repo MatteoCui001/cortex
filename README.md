@@ -1,6 +1,6 @@
 # Cortex
 
-> **v0.1.0-beta** -- AI-native knowledge infrastructure for humans and agents.
+> **v1.0.0** -- AI-native knowledge infrastructure for humans and agents.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-3776ab.svg)](https://www.python.org)
@@ -18,7 +18,7 @@ Built for knowledge workers who operate across languages (Chinese + English), fo
 
 ## Status / 状态
 
-This is an early **beta** release. The core features work but the API surface may change. Bug reports and feature requests are welcome via [GitHub Issues](https://github.com/MatteoCui001/cortex/issues).
+Public `v1.0.0` release. The core API, console, and thesis workflows are stable. Agent integrations are deployed from the sibling `cortex-wechat` repository.
 
 ## Why Cortex / 为什么做 Cortex
 
@@ -72,7 +72,7 @@ Hexagonal (ports & adapters) architecture. Domain logic is isolated from infrast
 | **Web console** | Real-time dashboard: events, signals, inbox, search, entity graph, thesis coverage |
 | **REST API** | Full CRUD + search + bulk operations, OpenAPI docs |
 | **CLI** | Import, sync, search, maintenance, digest — all from terminal |
-| **Docker deployment** | Single `docker compose up` with pgvector |
+| **Docker deployment** | `docker compose up -d db cortex` for backend only, or full stack with sibling `../cortex-wechat` |
 | **Bilingual** | Native Chinese + English support throughout (search, extraction, UI) |
 
 ## Quick Start / 快速开始
@@ -96,17 +96,29 @@ source ~/.cortex/env && uv run cortex serve
 # Open http://localhost:8420/console/
 ```
 
+For WeChat and agent integrations, clone the sibling `cortex-wechat` repo to `~/Projects/cortex-wechat` and follow its deployment guide.
+
 ### Option B: Docker
 
 ```bash
-git clone https://github.com/MatteoCui001/cortex.git
-cd cortex
+git clone https://github.com/MatteoCui001/cortex.git ~/Projects/cortex
+git clone https://github.com/MatteoCui001/cortex-wechat.git ~/Projects/cortex-wechat
+cd ~/Projects/cortex
 
 # Set your LLM API key (optional — search works without it)
 export LLM_API_KEY=your-key-here
 
-docker compose up -d
+docker compose up -d db cortex   # Backend only
+# docker compose up -d           # Full stack, requires sibling ../cortex-wechat
 # Open http://localhost:8420/console/
+```
+
+The Compose file expects the sibling-repo layout shown below when the `wechat` service is enabled:
+
+```text
+~/Projects/
+├── cortex/
+└── cortex-wechat/
 ```
 
 ### Option C: Manual setup
@@ -264,8 +276,8 @@ cortex/
 │   ├── api/              # FastAPI app, routes, static file serving
 │   └── cli/              # CLI entry point
 ├── console/              # React + TypeScript + Vite web console
-├── migrations/           # PostgreSQL migration files (001-009)
-├── tests/                # pytest suite (365 tests)
+├── migrations/           # PostgreSQL migration files (001-011)
+├── tests/                # pytest suite
 ├── config.yaml           # Default configuration
 ├── config.docker.yaml    # Docker overlay config
 ├── Dockerfile            # Multi-stage build (Node + Python)
@@ -289,15 +301,24 @@ cortex/
 uv sync --extra dev --extra local-embeddings
 
 # Run tests
-python3 -m pytest tests/ -q
+uv run pytest tests/ -q
 
 # Lint + format
 ruff check src/ tests/
 ruff format src/ tests/
 
-# Build console
-cd console && npm ci && npm run build
+# Lint + build console
+cd console && npm ci && npm run lint && npm run build
 ```
+
+## Release Smoke Test / 发布冒烟
+
+Follow [docs/release-smoke.md](docs/release-smoke.md) for the public `v1.0.0` sibling-repo smoke test. It covers:
+
+- `docker compose config` with `../cortex-wechat`
+- Cortex health and authenticated ingest
+- foreground `cortex-wechat` startup
+- a manual WeChat message round-trip
 
 ## License
 

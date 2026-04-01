@@ -1,7 +1,13 @@
 const BASE = "/api/v1";
 
+declare global {
+  interface Window {
+    __CORTEX_TOKEN__?: string;
+  }
+}
+
 function authHeaders(): Record<string, string> {
-  const token = (window as any).__CORTEX_TOKEN__;
+  const token = window.__CORTEX_TOKEN__;
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 

@@ -1,6 +1,6 @@
 [project]
 name = "cortex"
-version = "0.1.0"
+version = "1.0.0"
 description = "AI-native knowledge infrastructure for humans and agents"
 readme = "README.md"
 requires-python = ">=3.11"
