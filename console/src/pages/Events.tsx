@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { api, type Event } from "../api";
 import TypeLabel from "../components/TypeLabel";
 import DetailDrawer, { type DrawerTarget } from "../DetailDrawer";
@@ -44,7 +44,7 @@ function SourceLink({ path }: { path: string | null }) {
       target="_blank"
       rel="noopener noreferrer"
       className="text-[11px] truncate max-w-[280px] inline-block align-bottom transition-colors"
-      style={{ color: "var(--text-accent-dim)", textDecoration: "underline", textDecorationColor: "rgba(217,171,89,0.15)" }}
+      style={{ color: "var(--text-accent-dim)", textDecoration: "underline", textDecorationColor: "rgba(180,90,56,0.15)" }}
     >
       {url.replace(/^https?:\/\//, "").slice(0, 55)}
     </a>
@@ -52,6 +52,7 @@ function SourceLink({ path }: { path: string | null }) {
 }
 
 export default function Events() {
+  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const thesisFilter = searchParams.get("thesis");
 
@@ -59,6 +60,7 @@ export default function Events() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [days, setDays] = useState<number | undefined>(30);
+  const [sort, setSort] = useState<"recent" | "relevance">("recent");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
 
@@ -67,12 +69,12 @@ export default function Events() {
     setError(null);
     const req = thesisFilter
       ? api.thesisEvidence(thesisFilter)
-      : api.events(100, days);
+      : api.events(100, days, sort);
     req
       .then(setEvents)
       .catch((e) => setError(e.message || "Failed to load events"))
       .finally(() => setLoading(false));
-  }, [days, thesisFilter]);
+  }, [days, sort, thesisFilter]);
 
   return (
     <div>
@@ -96,18 +98,32 @@ export default function Events() {
               Clear filter
             </button>
           ) : (
-            <div className="segment-control">
-              {DAY_FILTERS.map((f) => (
-                <button
-                  key={f.label}
-                  onClick={() => setDays(f.days)}
-                  className="segment-btn"
-                  data-active={days === f.days ? "true" : undefined}
-                >
-                  {f.label}
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="segment-control">
+                {(["recent", "relevance"] as const).map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => setSort(s)}
+                    className="segment-btn"
+                    data-active={sort === s ? "true" : undefined}
+                  >
+                    {s === "recent" ? "Recent" : "Relevant"}
+                  </button>
+                ))}
+              </div>
+              <div className="segment-control">
+                {DAY_FILTERS.map((f) => (
+                  <button
+                    key={f.label}
+                    onClick={() => setDays(f.days)}
+                    className="segment-btn"
+                    data-active={days === f.days ? "true" : undefined}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -151,6 +167,14 @@ export default function Events() {
                       {e.raw_input_type && e.raw_input_type !== "text" && <MetaBadge>{e.raw_input_type}</MetaBadge>}
                       {e.source_type && <MetaBadge>{e.source_type}</MetaBadge>}
                       {e.temporality && e.temporality !== "permanent" && <TemporalityBadge value={e.temporality} />}
+                      {e.relevance != null && e.relevance > 0 && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded" style={{
+                          color: e.relevance >= 0.7 ? "var(--status-high)" : "var(--text-tertiary)",
+                          background: e.relevance >= 0.7 ? "var(--status-high-bg)" : "var(--bg-elevated)",
+                        }}>
+                          rel {e.relevance.toFixed(1)}
+                        </span>
+                      )}
                     </div>
                     {e.user_annotation && (
                       <div className="mt-1.5 text-[12px] italic" style={{ color: "var(--text-accent-dim)" }}>
@@ -194,10 +218,10 @@ export default function Events() {
                     {e.confidence > 0 && <span className="text-meta">conf {e.confidence.toFixed(2)}</span>}
                     <SourceLink path={e.source_path} />
                     <button
-                      onClick={(ev) => { ev.stopPropagation(); setDrawer({ kind: "event", id: e.id }); }}
+                      onClick={(ev) => { ev.stopPropagation(); navigate(`/events/${e.id}`); }}
                       className="ml-auto btn-accent text-[11px] font-medium px-2.5 py-1"
                     >
-                      Context
+                      View
                     </button>
                   </div>
                 </div>

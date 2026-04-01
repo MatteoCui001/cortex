@@ -44,7 +44,7 @@ class AnalyzeUseCase:
 
             if t["recent_avg"] is not None and t["previous_avg"] is not None:
                 # Need minimum samples in both windows to judge trend
-                if t["recent_count"] < 2 or t["previous_count"] < 2:
+                if t["recent_count"] < 1 or t["previous_count"] < 1:
                     tc.trend_direction = "insufficient_data"
                     tc.confidence_delta = None
                 else:
@@ -107,7 +107,7 @@ class AnalyzeUseCase:
         ]
         result["thesis_trends"] = [
             t for t in all_coverage
-            if t.trend_direction in ("up", "down")
+            if t.trend_direction in ("up", "down", "flat")
         ]
 
         # 4. Entity momentum (match the requested day range)

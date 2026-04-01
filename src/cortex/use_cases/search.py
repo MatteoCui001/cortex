@@ -122,14 +122,38 @@ class SearchUseCase:
         entity_types: Optional[list[str]] = None,
         limit: int = 20,
     ) -> list[dict]:
-        """Semantic search over entities."""
+        """Hybrid entity search: text name match boosted, then vector fallback."""
         query_embedding = await self._embedding.embed(query)
-        return await self._storage.semantic_search_entities(
+        results = await self._storage.semantic_search_entities(
             query_embedding,
             workspace_id=self._workspace_id,
             entity_types=entity_types,
-            limit=limit,
+            limit=limit * 2,  # fetch more for re-ranking
         )
+
+        # Boost results where query is a substring of entity name or alias
+        q_lower = query.lower().strip()
+        for r in results:
+            name_lower = r.get("name", "").lower()
+            aliases = r.get("aliases") or []
+            alias_text = " ".join(a.lower() for a in aliases)
+            if q_lower in name_lower or q_lower in alias_text:
+                r["score"] = min(1.0, r["score"] + 0.3)
+            elif name_lower in q_lower:
+                r["score"] = min(1.0, r["score"] + 0.15)
+
+        # Filter out low-relevance results that don't text-match
+        filtered = []
+        for r in results:
+            name_lower = r.get("name", "").lower()
+            aliases = r.get("aliases") or []
+            alias_text = " ".join(a.lower() for a in aliases)
+            has_text_match = q_lower in name_lower or q_lower in alias_text or name_lower in q_lower
+            if has_text_match or r["score"] >= 0.5:
+                filtered.append(r)
+
+        filtered.sort(key=lambda r: r["score"], reverse=True)
+        return filtered[:limit]
 
     async def entity_events(
         self,

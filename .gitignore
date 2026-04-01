@@ -28,3 +28,12 @@ uploads/
 
 # Console build output (regenerated from source)
 console/dist/
+
+# Temp/backup files
+*.bak
+*.log
+cortex.log
+
+# Claude Code session
+.claude/
+CLAUDE.md

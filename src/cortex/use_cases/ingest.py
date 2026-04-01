@@ -35,6 +35,15 @@ class IngestUseCase:
         self._embedding = embedding
         self._llm = llm
         self._workspace_id = workspace_id
+        self._thesis_uc = None  # lazy init
+
+    def _get_thesis_uc(self):
+        if self._thesis_uc is None and self._llm:
+            from cortex.use_cases.thesis import ThesisUseCase
+            self._thesis_uc = ThesisUseCase(
+                self._storage, self._workspace_id, llm=self._llm,
+            )
+        return self._thesis_uc
 
     async def import_vault(
         self,
@@ -129,8 +138,12 @@ class IngestUseCase:
         raw_input_ref: Optional[str] = None,
         user_annotation: Optional[str] = None,
         _frontmatter: Optional[dict] = None,
-    ) -> KnowledgeEvent:
-        """Import raw text with full Phase 3 classification pipeline."""
+    ) -> Optional[KnowledgeEvent]:
+        """Import raw text with full Phase 3 classification pipeline.
+
+        Returns None if the LLM quality gate determines the content
+        is not worth ingesting (e.g., tool templates, prompt configs).
+        """
         frontmatter = _frontmatter or {}
 
         # 1. Extract metadata via LLM (graceful fallback if LLM fails)
@@ -145,6 +158,14 @@ class IngestUseCase:
         if self._llm:
             try:
                 metadata = await self._llm.extract_metadata(content)
+                # Quality gate: LLM decided this content is not worth ingesting
+                if metadata.get("skip") is True:
+                    logger.info(
+                        "Skipping content (LLM gate): %s — %s",
+                        title[:60],
+                        metadata.get("skip_reason", "no reason"),
+                    )
+                    return None
             except Exception as e:
                 logger.warning("LLM metadata extraction failed, using fallback: %s", e)
                 metadata = _fallback_metadata
@@ -236,6 +257,7 @@ class IngestUseCase:
             expires_at=expires_at,
             user_annotation=user_annotation,
             user_stance=user_stance,
+            relevance=float(metadata.get("relevance", 0)) if metadata.get("relevance") is not None else None,
         )
 
         event_id = await self._storage.insert_event(event)
@@ -273,6 +295,19 @@ class IngestUseCase:
             )
             await self._storage.insert_relation(relation)
 
+        # Thesis impact evaluation (inline, non-blocking for vault imports)
+        thesis_uc = self._get_thesis_uc()
+        if thesis_uc:
+            try:
+                evidence = await thesis_uc.evaluate_event(event)
+                if evidence:
+                    logger.info(
+                        "Thesis evaluation: %d evidence(s) for '%s'",
+                        len(evidence), title[:60],
+                    )
+            except Exception:
+                logger.debug("Thesis evaluation failed for '%s'", title[:60], exc_info=True)
+
         return event
 
     async def _resolve_or_create_entity(
@@ -302,6 +337,40 @@ class IngestUseCase:
                 await self._storage.append_entity_alias(existing.id, raw_name)
             return existing.id
 
+        # Before creating, try semantic similarity to catch near-duplicates
+        # (e.g. "智能零售柜" vs "AI智能零售柜")
+        try:
+            canon_embedding = await self._embedding.embed(canon)
+        except Exception:
+            canon_embedding = None
+            logger.warning(
+                "Entity embedding failed for '%s', will need backfill",
+                canon, exc_info=True,
+            )
+
+        if canon_embedding:
+            try:
+                similar = await self._storage.semantic_search_entities(
+                    canon_embedding,
+                    workspace_id=self._workspace_id,
+                    limit=3,
+                )
+                for s in similar:
+                    if s.get("score", 0) >= 0.92:
+                        # High similarity — treat as same entity
+                        match_id = str(s["id"])
+                        logger.info(
+                            "Semantic dedup: '%s' matched existing '%s' (score=%.3f)",
+                            canon, s.get("name", "?"), s["score"],
+                        )
+                        if raw_name != s.get("name") and raw_name not in (s.get("aliases") or []):
+                            await self._storage.append_entity_alias(match_id, raw_name)
+                        if canon != s.get("name") and canon not in (s.get("aliases") or []):
+                            await self._storage.append_entity_alias(match_id, canon)
+                        return match_id
+            except Exception:
+                logger.debug("Semantic entity dedup check failed, proceeding with creation")
+
         # Create new entity with canonical name; raw_name saved as alias if different
         aliases = [raw_name] if raw_name != canon else []
         entity = Entity(
@@ -311,14 +380,8 @@ class IngestUseCase:
             name=canon,
             aliases=aliases,
         )
-        # Generate embedding at ingest time; failure is non-blocking
-        try:
-            entity.embedding = await self._embedding.embed(canon)
-        except Exception:
-            logger.warning(
-                "Entity embedding failed for '%s', will need backfill",
-                canon, exc_info=True,
-            )
+        if canon_embedding:
+            entity.embedding = canon_embedding
         return await self._storage.insert_entity(entity)
 
     async def post_ingest_analyze(self, event: KnowledgeEvent) -> list:

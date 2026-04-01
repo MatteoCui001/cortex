@@ -58,8 +58,8 @@ def compute_value_score(
     stance = new_event.user_stance or "agree"
     stance_mult = _STANCE_MULTIPLIER.get(stance, 1.0)
 
-    # Thesis relevance
-    thesis_boost = 1.1 if new_event.thesis_links else 1.0
+    # Thesis relevance — thesis-linked signals rank much higher
+    thesis_boost = 1.5 if new_event.thesis_links else 1.0
 
     # Confidence from LLM classification
     conf = signal.confidence

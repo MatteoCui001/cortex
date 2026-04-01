@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { useNavigate } from "react-router-dom";
 import { api, type Event, type Signal, type SearchResult, type RelationRow, type Annotation } from "./api";
 import TypeLabel from "./components/TypeLabel";
 
@@ -318,6 +319,7 @@ function EditableTitle({ value, onSave }: { value: string; onSave: (v: string) =
 /* ── Main Drawer ── */
 
 export default function DetailDrawer({ target, onClose }: Props) {
+  const navigate = useNavigate();
   const [event, setEvent] = useState<Event | null>(null);
   const [related, setRelated] = useState<SearchResult[]>([]);
   const [relations, setRelations] = useState<RelationRow[]>([]);
@@ -433,6 +435,13 @@ export default function DetailDrawer({ target, onClose }: Props) {
                     <div className="flex items-center gap-2">
                       <TypeLabel type={event.type} />
                       <span className="text-meta font-data">{event.id.slice(0, 8)}</span>
+                      <button
+                        onClick={() => { onClose(); navigate(`/events/${event.id}`); }}
+                        className="ml-auto text-[11px] font-medium px-2 py-0.5 rounded"
+                        style={{ color: "var(--text-accent)", background: "var(--bg-elevated)" }}
+                      >
+                        Full page &rarr;
+                      </button>
                     </div>
                     <EditableTitle
                       value={event.title || ""}
@@ -468,7 +477,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
                         items={event.thesis_links}
                         onUpdate={(thesis_links) => handleUpdateField({ thesis_links })}
                         color="var(--text-accent)"
-                        bg="rgba(217,171,89,0.08)"
+                        bg="rgba(180,90,56,0.07)"
                       />
                     </div>
                     {event.source_path && (
@@ -504,7 +513,7 @@ export default function DetailDrawer({ target, onClose }: Props) {
                                  "var(--text-accent)",
                           background: linkedSignal.signal_type === "contradiction" ? "var(--status-high-bg)" :
                                       linkedSignal.signal_type === "answer" ? "var(--status-success-bg)" :
-                                      "rgba(217,171,89,0.08)",
+                                      "rgba(180,90,56,0.07)",
                         }}
                       >
                         {linkedSignal.signal_type}

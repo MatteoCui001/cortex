@@ -4,7 +4,7 @@ Produces structured PushNotification objects. Delivery is handled elsewhere.
 """
 from __future__ import annotations
 
-from cortex.domain.entities import ContradictionResult, PushNotification
+from cortex.domain.entities import ContradictionResult, PushNotification, ThesisEvidence
 from cortex.domain.ports import StoragePort
 
 # Minimum priority_score for a signal to become a notification
@@ -20,13 +20,15 @@ class PushDetector:
     async def check_all(
         self,
         signals: list[ContradictionResult] | None = None,
+        thesis_evidence: list[ThesisEvidence] | None = None,
     ) -> list[PushNotification]:
         """Run all detection checks and return notifications."""
         notifications: list[PushNotification] = []
         if signals:
             notifications += self.check_signals(signals)
         notifications += await self.check_stale_theses()
-        notifications += await self.check_entity_momentum()
+        if thesis_evidence:
+            notifications += self.check_thesis_evidence(thesis_evidence)
         return notifications
 
     def check_signals(
@@ -67,27 +69,28 @@ class PushDetector:
                 ))
         return notifications
 
-    async def check_entity_momentum(
+    def check_thesis_evidence(
         self,
-        days: int = 7,
-        threshold: int = 5,
+        evidence_list: list[ThesisEvidence],
+        thesis_texts: dict[str, str] | None = None,
     ) -> list[PushNotification]:
-        """Detect entities with unusual mention frequency."""
-        momentum = await self._storage.entity_momentum(
-            days=days,
-            workspace_id=self._workspace_id,
-            limit=20,
-        )
+        """Create notifications for non-neutral thesis evidence."""
+        thesis_texts = thesis_texts or {}
         notifications = []
-        for ent in momentum:
-            if ent["mentions"] >= threshold:
-                notifications.append(PushNotification(
-                    trigger_type="entity_momentum_spike",
-                    title=f"High activity: {ent['name']}",
-                    body=f"{ent['name']} ({ent['type']}) mentioned {ent['mentions']} times in {days} days.",
-                    priority="low",
-                    workspace_id=self._workspace_id,
-                ))
+        for ev in evidence_list:
+            if ev.impact.value == "neutral":
+                continue
+            if ev.confidence_delta < 0.3:
+                continue
+            thesis_label = thesis_texts.get(ev.thesis_id, ev.thesis_id)[:50]
+            notifications.append(PushNotification(
+                trigger_type="thesis_evidence_recorded",
+                title=f"New evidence for: {thesis_label}",
+                body=f"{ev.impact.value} (delta: +{ev.confidence_delta:.1f}) — {ev.rationale or ''}",
+                related_event_ids=[ev.event_id],
+                priority="medium",
+                workspace_id=self._workspace_id,
+            ))
         return notifications
 
     def from_contradiction(

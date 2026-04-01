@@ -354,22 +354,28 @@ class TestPushDetector:
 
         assert notifications == []
 
-    @pytest.mark.asyncio
-    async def test_entity_momentum_spike(self):
-        """An entity with >= 5 mentions in the last 7 days triggers a momentum spike notification."""
-        momentum_data = [
-            {"name": "OpenAI", "type": "company", "mentions": 10},
-        ]
-        storage = FakeStorageWithMomentum(momentum_data)
+    def test_thesis_evidence_notification(self):
+        """Non-neutral thesis evidence with high delta creates a notification."""
+        from cortex.domain.entities import ThesisEvidence, EvidenceImpact
+        storage = FakeStorage()
         detector = PushDetector(storage=storage, workspace_id="default")
 
-        notifications = await detector.check_entity_momentum()
+        evidence = [ThesisEvidence(
+            thesis_id="t1",
+            event_id="ev1",
+            impact=EvidenceImpact.SUPPORTS,
+            confidence_delta=0.5,
+            rationale="Strong data point",
+        )]
+        notifications = detector.check_thesis_evidence(
+            evidence, thesis_texts={"t1": "AI Agent Infrastructure"},
+        )
 
         assert len(notifications) == 1
         notif = notifications[0]
         assert isinstance(notif, PushNotification)
-        assert notif.trigger_type == "entity_momentum_spike"
-        assert "OpenAI" in notif.title
+        assert notif.trigger_type == "thesis_evidence_recorded"
+        assert "AI Agent Infrastructure" in notif.title
 
     @pytest.mark.asyncio
     async def test_from_contradiction_helper(self):
@@ -770,6 +776,68 @@ class TestAuditClassification:
 
 
 # ---------------------------------------------------------------------------
+# Quality Gate (LLM skip) Tests
+# ---------------------------------------------------------------------------
+
+class TestQualityGate:
+
+    @pytest.mark.asyncio
+    async def test_skip_content_returns_none(self):
+        """When LLM returns skip=True, import_text should return None."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        class SkippingLLM(FakeLLM):
+            async def extract_metadata(self, content):
+                return {"skip": True, "skip_reason": "prompt template"}
+
+        llm = SkippingLLM()
+        uc = IngestUseCase(storage, embedding, llm, workspace_id="default")
+        result = await uc.import_text("Make shorter", "Make shorter")
+        assert result is None
+        assert len(storage._events) == 0
+
+    @pytest.mark.asyncio
+    async def test_keep_content_ingests_normally(self):
+        """When LLM returns skip=False, content is ingested as normal."""
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+        llm = FakeLLM()
+        uc = IngestUseCase(storage, embedding, llm, workspace_id="default")
+        result = await uc.import_text("光伏银浆成本降30%", "重要行业趋势")
+        assert result is not None
+        assert len(storage._events) == 1
+
+    @pytest.mark.asyncio
+    async def test_vault_import_counts_skips(self):
+        """Vault import should count skipped files properly."""
+        import tempfile, os
+        storage = FakeStorage()
+        embedding = FakeEmbedding()
+
+        class SelectiveLLM(FakeLLM):
+            async def extract_metadata(self, content):
+                if "template" in content.lower():
+                    return {"skip": True, "skip_reason": "tool template"}
+                return await super().extract_metadata(content)
+
+        llm = SelectiveLLM()
+        uc = IngestUseCase(storage, embedding, llm, workspace_id="default")
+
+        with tempfile.TemporaryDirectory() as td:
+            # Real knowledge
+            with open(os.path.join(td, "deal.md"), "w") as f:
+                f.write("蛮酷 Series A 进展")
+            # Template junk
+            with open(os.path.join(td, "template.md"), "w") as f:
+                f.write("Template: Make shorter")
+
+            stats = await uc.import_vault(td)
+            assert stats["imported"] == 1
+            assert stats["skipped"] == 1
+
+
+# ---------------------------------------------------------------------------
 # Entity Embedding at Ingest Time (Phase 12)
 # ---------------------------------------------------------------------------
 
@@ -1071,8 +1139,8 @@ class TestThesisTrend:
         assert result[0].trend_direction == "insufficient_data"
 
     @pytest.mark.asyncio
-    async def test_insufficient_data_low_sample(self):
-        """Both windows have data but < 2 samples => 'insufficient_data'."""
+    async def test_low_sample_still_computes_trend(self):
+        """Both windows have 1 sample each — enough for trend with relaxed threshold."""
         from cortex.domain.entities import ThesisCoverage
         tc = ThesisCoverage(
             thesis_name="Harness", event_count=3, avg_confidence=0.6,
@@ -1088,8 +1156,8 @@ class TestThesisTrend:
         uc = AnalyzeUseCase(storage, "default")
         result = await uc.thesis_coverage()
 
-        assert result[0].trend_direction == "insufficient_data"
-        assert result[0].confidence_delta is None
+        assert result[0].trend_direction == "up"
+        assert result[0].confidence_delta is not None
 
     @pytest.mark.asyncio
     async def test_insufficient_data_one_window_null(self):

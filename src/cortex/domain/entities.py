@@ -83,6 +83,9 @@ class KnowledgeEvent:
     user_annotation: Optional[str] = None  # raw natural language
     user_stance: Optional[str] = None      # agree|disagree|uncertain|skip
 
+    # Relevance score from LLM extraction (0.0-1.0)
+    relevance: Optional[float] = None
+
 
 @dataclass
 class Entity:
@@ -264,3 +267,69 @@ class Notification:
                 f"Cannot transition from {self.status.value} to {new_status.value}"
             )
         self.status = new_status
+
+
+# ------------------------------------------------------------------
+# Phase 6: Structured Theses (user-driven predictions)
+# ------------------------------------------------------------------
+
+class ThesisStance(str, Enum):
+    BULLISH = "bullish"
+    BEARISH = "bearish"
+    NEUTRAL = "neutral"
+
+
+class ThesisStatus(str, Enum):
+    ACTIVE = "active"
+    RESOLVED = "resolved"
+    INVALIDATED = "invalidated"
+
+
+class ThesisCreatedBy(str, Enum):
+    MANUAL = "manual"
+    FLEETING = "fleeting"
+    INFERRED = "inferred"
+
+
+class EvidenceImpact(str, Enum):
+    SUPPORTS = "supports"
+    CONTRADICTS = "contradicts"
+    NEUTRAL = "neutral"
+
+
+@dataclass
+class Thesis:
+    """A structured, verifiable judgment/prediction owned by the user."""
+    text: str
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str = "default"
+    stance: ThesisStance = ThesisStance.NEUTRAL
+    theme: Optional[str] = None
+    status: ThesisStatus = ThesisStatus.ACTIVE
+    expires_at: Optional[datetime] = None
+    created_by: ThesisCreatedBy = ThesisCreatedBy.MANUAL
+    confirmed: bool = True
+    confidence: float = 0.5  # computed at read time, never persisted
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    def __post_init__(self):
+        if not self.created_at:
+            self.created_at = datetime.now(timezone.utc)
+        if not self.updated_at:
+            self.updated_at = datetime.now(timezone.utc)
+
+
+@dataclass
+class ThesisEvidence:
+    """Links an event to a thesis with assessed impact on confidence."""
+    thesis_id: str
+    event_id: str
+    impact: EvidenceImpact
+    id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    workspace_id: str = "default"
+    confidence_delta: float = 0.0
+    rationale: Optional[str] = None
+    created_at: Optional[datetime] = field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
