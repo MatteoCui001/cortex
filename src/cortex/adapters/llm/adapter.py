@@ -3,11 +3,30 @@ LLM adapter for metadata extraction via OpenRouter-compatible API.
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from typing import Optional
 
 import httpx
+
+_log = logging.getLogger(__name__)
+
+
+async def _retry_async(coro_factory, *, retries: int = 3, backoff: float = 2.0):
+    """Retry an async callable with exponential backoff on transient errors."""
+    last_exc = None
+    for attempt in range(retries):
+        try:
+            return await coro_factory()
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.RemoteProtocolError) as e:
+            last_exc = e
+            if attempt < retries - 1:
+                wait = backoff * (2 ** attempt)
+                _log.warning("Retry %d/%d after %.1fs: %s", attempt + 1, retries, wait, e)
+                await asyncio.sleep(wait)
+    raise last_exc  # type: ignore[misc]
 
 from cortex.domain.ports import LLMPort
 from cortex.domain.stance import parse_user_stance
@@ -201,22 +220,25 @@ class OpenRouterLLM(LLMPort):
         return await self._chat(prompt)
 
     async def _chat(self, prompt: str) -> str:
-        async with httpx.AsyncClient(timeout=90) as client:
-            resp = await client.post(
-                f"{self._base_url}{self._chat_endpoint}",
-                headers={
-                    "Authorization": f"Bearer {self._api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "model": self._model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.1,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+        async def _do_request():
+            async with httpx.AsyncClient(timeout=90) as client:
+                resp = await client.post(
+                    f"{self._base_url}{self._chat_endpoint}",
+                    headers={
+                        "Authorization": f"Bearer {self._api_key}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": self._model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "temperature": 0.1,
+                    },
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                return data["choices"][0]["message"]["content"]
+
+        return await _retry_async(_do_request)
 
 
 def _parse_json(text: str) -> dict:

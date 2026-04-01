@@ -88,10 +88,23 @@ class IngestLinkUseCase:
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
         }
-        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
-            resp = await client.get(url, headers=headers)
-            resp.raise_for_status()
-            html = resp.text
+        import asyncio as _aio
+        last_exc = None
+        html = ""
+        for _attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                    resp = await client.get(url, headers=headers)
+                    resp.raise_for_status()
+                    html = resp.text
+                    break
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                last_exc = e
+                if _attempt < 2:
+                    await _aio.sleep(2 * (2 ** _attempt))
+        else:
+            if last_exc:
+                raise last_exc
 
         # 2. Extract text — specialised path for WeChat articles
         if is_wechat:

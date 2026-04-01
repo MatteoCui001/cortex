@@ -146,7 +146,7 @@ class IngestUseCase:
         """
         frontmatter = _frontmatter or {}
 
-        # 1. Extract metadata via LLM (graceful fallback if LLM fails)
+        # 1. Extract metadata + classify + parse stance via LLM (parallelized)
         _fallback_metadata = {
             "summary": content[:200].replace("\n", " "),
             "tags": list(frontmatter.get("tags", [])) if frontmatter.get("tags") else [],
@@ -155,39 +155,53 @@ class IngestUseCase:
             "confidence": 0.5,
             "event_type": event_type,
         }
+
+        metadata = _fallback_metadata
+        classification = {}
+        user_stance = None
+
         if self._llm:
-            try:
-                metadata = await self._llm.extract_metadata(content)
+            # Run independent LLM calls concurrently
+            async def _extract():
+                try:
+                    return await self._llm.extract_metadata(content)
+                except Exception as e:
+                    logger.warning("LLM metadata extraction failed, using fallback: %s", e)
+                    return None
+
+            async def _classify():
+                try:
+                    return await self._llm.classify_three_dimensions(content)
+                except Exception as e:
+                    logger.warning("Classification failed: %s", e)
+                    return {}
+
+            async def _parse_stance():
+                if not user_annotation:
+                    return None
+                try:
+                    return await self._llm.parse_stance_llm(user_annotation)
+                except Exception as e:
+                    logger.warning("Stance parsing failed: %s", e)
+                    return None
+
+            meta_result, class_result, stance_result = await asyncio.gather(
+                _extract(), _classify(), _parse_stance(),
+            )
+
+            if meta_result is not None:
                 # Quality gate: LLM decided this content is not worth ingesting
-                if metadata.get("skip") is True:
+                if meta_result.get("skip") is True:
                     logger.info(
                         "Skipping content (LLM gate): %s — %s",
                         title[:60],
-                        metadata.get("skip_reason", "no reason"),
+                        meta_result.get("skip_reason", "no reason"),
                     )
                     return None
-            except Exception as e:
-                logger.warning("LLM metadata extraction failed, using fallback: %s", e)
-                metadata = _fallback_metadata
-        else:
-            metadata = _fallback_metadata
-
-        # 2. Classify three dimensions via LLM
-        classification = {}
-        if self._llm:
-            try:
-                classification = await self._llm.classify_three_dimensions(content)
-            except Exception as e:
-                logger.warning("Classification failed: %s", e)
-
-        # 3. Parse user stance
-        user_stance = None
-        if user_annotation and self._llm:
-            try:
-                user_stance = await self._llm.parse_stance_llm(user_annotation)
-            except Exception as e:
-                logger.warning("Stance parsing failed: %s", e)
-        elif user_annotation:
+                metadata = meta_result
+            classification = class_result or {}
+            user_stance = stance_result
+        elif user_annotation and not self._llm:
             from cortex.domain.stance import parse_user_stance
             user_stance = parse_user_stance(user_annotation)
 
@@ -262,10 +276,14 @@ class IngestUseCase:
 
         event_id = await self._storage.insert_event(event)
 
-        # 8. Extract and store entities + relations (with canonicalization + inline embedding)
+        # 8. Extract and store entities + relations (with canonicalization + batch embedding)
         entities = metadata.get("entities", [])
         if not isinstance(entities, list):
             entities = []
+
+        # Pre-process: collect valid entities and their canonical names
+        parsed_entities = []
+        canon_names = []
         for ent_data in entities:
             if not isinstance(ent_data, dict):
                 continue
@@ -276,11 +294,25 @@ class IngestUseCase:
             raw_name = str(ent_data.get("name", "")).strip()
             if not raw_name:
                 continue
-
-            # Canonicalize: look up existing entity by canonical key
             canon = canonical_key(raw_name)
+            parsed_entities.append((ent_type, raw_name, canon))
+            canon_names.append(canon)
+
+        # Batch embed all canonical names at once (instead of one-by-one)
+        canon_embeddings: dict[str, list[float] | None] = {}
+        if canon_names:
+            unique_canons = list(dict.fromkeys(canon_names))  # dedupe preserving order
+            try:
+                embeddings = await self._embedding.embed_batch(unique_canons)
+                for c, emb in zip(unique_canons, embeddings):
+                    canon_embeddings[c] = emb
+            except Exception:
+                logger.warning("Batch entity embedding failed, falling back to per-entity")
+
+        for ent_type, raw_name, canon in parsed_entities:
             entity_id = await self._resolve_or_create_entity(
                 ent_type, raw_name, canon,
+                precomputed_embedding=canon_embeddings.get(canon),
             )
 
             relation = Relation(
@@ -312,6 +344,7 @@ class IngestUseCase:
 
     async def _resolve_or_create_entity(
         self, ent_type, raw_name: str, canon: str,
+        precomputed_embedding: list[float] | None = None,
     ) -> str:
         """Find existing entity by canonical key, or create a new one.
 
@@ -337,16 +370,16 @@ class IngestUseCase:
                 await self._storage.append_entity_alias(existing.id, raw_name)
             return existing.id
 
-        # Before creating, try semantic similarity to catch near-duplicates
-        # (e.g. "智能零售柜" vs "AI智能零售柜")
-        try:
-            canon_embedding = await self._embedding.embed(canon)
-        except Exception:
-            canon_embedding = None
-            logger.warning(
-                "Entity embedding failed for '%s', will need backfill",
-                canon, exc_info=True,
-            )
+        # Use precomputed embedding from batch, or fall back to single embed
+        canon_embedding = precomputed_embedding
+        if canon_embedding is None:
+            try:
+                canon_embedding = await self._embedding.embed(canon)
+            except Exception:
+                logger.warning(
+                    "Entity embedding failed for '%s', will need backfill",
+                    canon, exc_info=True,
+                )
 
         if canon_embedding:
             try:

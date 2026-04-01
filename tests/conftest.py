@@ -223,8 +223,20 @@ class FakeStorage(StoragePort):
     async def update_event_tags(self, event_id, tags):
         pass
 
-    async def get_all_entities(self, workspace_id="default") -> list[dict]:
-        return []
+    async def get_all_entities(self, workspace_id="default", *, limit=0, order_by="name") -> list[dict]:
+        result = [
+            {"id": e.id, "type": e.type.value if hasattr(e.type, "value") else e.type,
+             "name": e.name, "mention_count": 0}
+            for e in self._entities.values()
+            if e.workspace_id == workspace_id
+        ]
+        if order_by == "mention_count":
+            result.sort(key=lambda x: x["mention_count"], reverse=True)
+        else:
+            result.sort(key=lambda x: x["name"])
+        if limit > 0:
+            result = result[:limit]
+        return result
 
     async def merge_entities(self, keep_id, remove_id):
         pass

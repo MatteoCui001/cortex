@@ -11,7 +11,7 @@ from typing import Optional
 from cortex.domain.ports import EmbeddingPort
 
 _model = None
-_executor = ThreadPoolExecutor(max_workers=2)
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 class LocalEmbedding(EmbeddingPort):

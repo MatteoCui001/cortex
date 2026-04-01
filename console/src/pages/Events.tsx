@@ -63,18 +63,36 @@ export default function Events() {
   const [sort, setSort] = useState<"recent" | "relevance">("recent");
   const [expanded, setExpanded] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<DrawerTarget | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const PAGE_SIZE = 50;
 
   useEffect(() => {
     setLoading(true);
     setError(null);
     const req = thesisFilter
       ? api.thesisEvidence(thesisFilter)
-      : api.events(100, days, sort);
+      : api.events(PAGE_SIZE, days, sort, 0);
     req
-      .then(setEvents)
+      .then((data) => {
+        setEvents(data);
+        setHasMore(!thesisFilter && data.length >= PAGE_SIZE);
+      })
       .catch((e) => setError(e.message || "Failed to load events"))
       .finally(() => setLoading(false));
   }, [days, sort, thesisFilter]);
+
+  const loadMore = () => {
+    if (loadingMore || !hasMore) return;
+    setLoadingMore(true);
+    api.events(PAGE_SIZE, days, sort, events.length)
+      .then((data) => {
+        setEvents((prev) => [...prev, ...data]);
+        setHasMore(data.length >= PAGE_SIZE);
+      })
+      .catch((e) => setError(e.message || "Failed to load more"))
+      .finally(() => setLoadingMore(false));
+  };
 
   return (
     <div>
@@ -228,6 +246,18 @@ export default function Events() {
               )}
             </div>
           ))}
+        </div>
+      )}
+
+      {hasMore && !loading && (
+        <div className="text-center mt-6">
+          <button
+            onClick={loadMore}
+            disabled={loadingMore}
+            className="btn-accent text-[12px] font-medium px-4 py-2"
+          >
+            {loadingMore ? "Loading..." : "Load more"}
+          </button>
         </div>
       )}
 

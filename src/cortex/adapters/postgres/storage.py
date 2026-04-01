@@ -27,7 +27,7 @@ class PostgresStorage(StoragePort):
         self._has_embedding = False  # detected at connect time
 
     async def connect(self):
-        self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=10)
+        self._pool = await asyncpg.create_pool(self._dsn, min_size=2, max_size=20)
         try:
             await self._pool.execute("CREATE EXTENSION IF NOT EXISTS vector")
         except Exception:
@@ -625,15 +625,20 @@ class PostgresStorage(StoragePort):
             json.dumps(tags), event_id,
         )
 
-    async def get_all_entities(self, workspace_id: str = "default") -> list[dict]:
-        rows = await self._pool.fetch("""
+    async def get_all_entities(
+        self, workspace_id: str = "default", *, limit: int = 0, order_by: str = "name",
+    ) -> list[dict]:
+        order_clause = "ORDER BY mention_count DESC" if order_by == "mention_count" else "ORDER BY e.name"
+        limit_clause = f"LIMIT {int(limit)}" if limit > 0 else ""
+        rows = await self._pool.fetch(f"""
             SELECT e.id, e.type, e.name,
                    COUNT(r.id) AS mention_count
             FROM entities e
             LEFT JOIN relations r ON r.target_id = e.id AND r.target_type = 'entity'
             WHERE e.workspace_id = $1
             GROUP BY e.id, e.type, e.name
-            ORDER BY e.name
+            {order_clause}
+            {limit_clause}
         """, workspace_id)
         return [{"id": str(r["id"]), "type": r["type"], "name": r["name"], "mention_count": r["mention_count"]} for r in rows]
 

@@ -103,7 +103,7 @@ class NotificationManager:
     # ------------------------------------------------------------------
 
     async def _deliver_webhook(self, notif: Notification) -> bool:
-        """Sync HTTP POST. Returns True on 2xx."""
+        """HTTP POST with retry. Returns True on 2xx."""
         url = self._webhook_cfg.get("url", "")
         if not url:
             return False
@@ -122,13 +122,23 @@ class NotificationManager:
             body_bytes = json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
             sig = hmac.new(secret.encode(), body_bytes, hashlib.sha256).hexdigest()
             headers["X-Webhook-Signature"] = f"sha256={sig}"
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                resp = await client.post(url, json=payload, headers=headers)
-                return 200 <= resp.status_code < 300
-        except Exception:
-            logger.warning("Webhook delivery failed for notification %s", notif.id, exc_info=True)
-            return False
+
+        import asyncio
+        last_exc = None
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    resp = await client.post(url, json=payload, headers=headers)
+                    return 200 <= resp.status_code < 300
+            except (httpx.TimeoutException, httpx.ConnectError) as e:
+                last_exc = e
+                if attempt < 2:
+                    await asyncio.sleep(1 * (2 ** attempt))
+            except Exception:
+                logger.warning("Webhook delivery failed for notification %s", notif.id, exc_info=True)
+                return False
+        logger.warning("Webhook delivery failed after retries for %s: %s", notif.id, last_exc)
+        return False
 
     def _should_webhook(self, notif: Notification) -> bool:
         """Check webhook enabled + priority meets min_priority."""

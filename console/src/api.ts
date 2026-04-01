@@ -11,10 +11,31 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
-async function get<T>(path: string): Promise<T> {
+// Simple TTL cache for GET requests
+const _cache = new Map<string, { data: unknown; expires: number }>();
+const CACHE_TTL_MS = 10_000; // 10 seconds
+
+function getCached<T>(path: string): T | undefined {
+  const entry = _cache.get(path);
+  if (entry && Date.now() < entry.expires) return entry.data as T;
+  _cache.delete(path);
+  return undefined;
+}
+
+function setCache(path: string, data: unknown) {
+  _cache.set(path, { data, expires: Date.now() + CACHE_TTL_MS });
+}
+
+async function get<T>(path: string, opts?: { skipCache?: boolean }): Promise<T> {
+  if (!opts?.skipCache) {
+    const cached = getCached<T>(path);
+    if (cached !== undefined) return cached;
+  }
   const res = await fetch(`${BASE}${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  return res.json();
+  const data = await res.json();
+  setCache(path, data);
+  return data;
 }
 
 async function post<T>(path: string, body?: unknown): Promise<T> {
@@ -229,8 +250,8 @@ async function del(path: string): Promise<unknown> {
 export const api = {
   health: () => get<{ status: string }>("/health"),
   stats: () => get<Stats>("/stats"),
-  events: (limit = 50, days?: number, sort: string = "recent") =>
-    get<Event[]>(`/events?limit=${limit}&sort=${sort}${days ? `&days=${days}` : ""}`),
+  events: (limit = 50, days?: number, sort: string = "recent", offset = 0) =>
+    get<Event[]>(`/events?limit=${limit}&offset=${offset}&sort=${sort}${days ? `&days=${days}` : ""}`),
   event: (id: string) => get<Event>(`/events/${id}`),
   eventRelated: (id: string, limit = 10) =>
     get<SearchResult[]>(`/search/related/${id}?limit=${limit}`),

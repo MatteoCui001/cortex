@@ -263,8 +263,9 @@ async def graph_overview(request: Request):
 @router.get("/entities/top", response_model=list[EntityResponse])
 async def top_entities(request: Request, limit: int = Query(30, ge=1, le=200)):
     """Get top entities by mention count for overview graph."""
-    all_entities = await request.app.state.storage.get_all_entities()
-    sorted_ents = sorted(all_entities, key=lambda e: e["mention_count"], reverse=True)[:limit]
+    sorted_ents = await request.app.state.storage.get_all_entities(
+        limit=limit, order_by="mention_count",
+    )
     return [
         EntityResponse(
             id=e["id"],
@@ -1217,6 +1218,12 @@ async def backfill_thesis_evidence(
     limit: int = Query(100, ge=1, le=1000),
 ):
     """Backfill thesis evidence for existing events that have thesis_links but no evidence."""
+    import os, hmac as _hmac
+    _token = os.environ.get("CORTEX_API_TOKEN", "")
+    if _token:
+        auth = request.headers.get("authorization", "")
+        if not _hmac.compare_digest(auth, f"Bearer {_token}"):
+            raise HTTPException(403, "Admin endpoints require valid API token")
     workspace = request.app.state.config.get("workspace", "default")
     storage = request.app.state.storage
     llm = request.app.state.llm

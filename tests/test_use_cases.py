@@ -881,6 +881,13 @@ class TestEntityEmbeddingAtIngest:
                     raise RuntimeError("Embedding service down")
                 return await super().embed(text)
 
+            async def embed_batch(self, texts):
+                # Simulate partial failure: raise if any text would fail
+                for t in texts:
+                    if t == "openai":
+                        raise RuntimeError("Batch embedding service down")
+                return await super().embed_batch(texts)
+
         class LLMWithEntities(FakeLLM):
             async def extract_metadata(self, content):
                 base = await super().extract_metadata(content)

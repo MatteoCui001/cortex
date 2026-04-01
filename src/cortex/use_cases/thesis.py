@@ -142,7 +142,7 @@ class ThesisUseCase:
                 created_by="inferred",
             )
             created.append(thesis)
-            existing_texts.add(text.lower())
+            existing_texts_lower.add(text.lower())
 
         log.info(
             "Generated %d theses for theme '%s' from %d events",
